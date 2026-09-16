@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Квесты — расписание смен</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1f;
+      color: #e8e8ea;
+      padding: 12px;
+      padding-bottom: 40px;
+      min-height: 100vh;
+    }
+    header { padding: 8px 0 16px; border-bottom: 1px solid #2a2a32; margin-bottom: 16px; }
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    h1 { font-size: 20px; font-weight: 600; }
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .user-badge {
+      font-size: 12px; color: #8a8a96; background: #23232b;
+      padding: 5px 10px; border-radius: 20px; white-space: nowrap;
+    }
+    .user-badge.admin { color: #d4a857; border: 1px solid #d4a857; }
+    .btn-add {
+      background: #d4a857; color: #1a1a1f; border: none;
+      padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-add:active { background: #b58d3f; }
+    .btn-remove {
+      background: #3a1f1f; color: #e05a5a; border: none;
+      padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-remove:active { background: #4a2020; }
+
+    .week-nav { display: flex; align-items: center; gap: 8px; margin-top: 12px; margin-bottom: 8px; }
+    .week-nav button {
+      background: #2a2a32; color: #e8e8ea; border: none;
+      padding: 6px 12px; border-radius: 8px; font-size: 15px; cursor: pointer;
+    }
+    .week-nav button:active { background: #3a3a44; }
+    .week-range { flex: 1; text-align: center; font-size: 13px; color: #8a8a96; }
+    .week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .day-btn {
+      background: #23232b; color: #8a8a96; border: 1px solid transparent;
+      border-radius: 8px; padding: 8px 2px; font-size: 12px; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    .day-btn:active { background: #2a2a34; }
+    .day-btn .day-name { font-size: 10px; text-transform: uppercase; opacity: 0.7; }
+    .day-btn .day-num { font-size: 15px; font-weight: 600; color: #e8e8ea; }
+    .day-btn.active { background: #3a3a44; border-color: #d4a857; }
+    .day-btn.active .day-num { color: #d4a857; }
+    .day-btn.today .day-num { color: #4caf7d; }
+
+    .locations { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+    .location h2 {
+      font-size: 15px; color: #8a8a96; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px; padding-left: 4px;
+    }
+    .slots { display: flex; flex-direction: column; gap: 8px; }
+    .slot {
+      background: #23232b; border-radius: 10px; padding: 10px 12px;
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid transparent; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .slot:active { background: #2a2a34; }
+    .slot.booked { border-color: #d4a857; background: #2e2818; }
+    .slot.mine { border-color: #4caf7d; background: #1f3327; }
+    .slot.full:not(.mine) { opacity: 0.85; }
+    .slot-time { font-size: 15px; font-weight: 600; color: #fff; min-width: 48px; }
+    .slot-info { flex: 1; min-width: 0; }
+    .slot-quest {
+      font-size: 13px; color: #d4a857; font-weight: 500; margin-bottom: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .slot-quest.empty { color: #6a6a76; font-weight: 400; font-style: italic; }
+    .slot-staff {
+      font-size: 11px; color: #8a8a96;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .slot-counter { font-size: 11px; color: #8a8a96; min-width: 28px; text-align: right; }
+    .slot-counter.free { color: #4caf7d; }
+    .slot-counter.full { color: #d4a857; }
+    .slot-counter.mine { color: #4caf7d; font-weight: 600; }
+
+    /* Кнопка управления слотом (для админа) */
+    .slot-manage {
+      background: #3a3a44; color: #d4a857; border: none;
+      width: 26px; height: 26px; border-radius: 6px;
+      font-size: 14px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; padding: 0; line-height: 1;
+    }
+    .slot-manage:active { background: #4a4a55; }
+
+    .loading { text-align: center; padding: 40px 20px; color: #8a8a96; font-size: 14px; }
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #2a2a32; color: #e8e8ea; padding: 10px 18px;
+      border-radius: 10px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 100;
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { border: 1px solid #e05a5a; color: #e05a5a; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); z-index: 200;
+      align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: #1f1f26; border-radius: 14px; padding: 20px;
+      width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto;
+      border: 1px solid #2a2a32;
+    }
+    .modal h3 { font-size: 17px; margin-bottom: 16px; }
+    .modal label {
+      display: block; font-size: 12px; color: #8a8a96;
+      margin-bottom: 4px; margin-top: 10px;
+    }
+    .modal input, .modal select, .modal textarea {
+      width: 100%; background: #23232b; color: #e8e8ea;
+      border: 1px solid #2a2a32; border-radius: 8px;
+      padding: 9px 11px; font-size: 14px; font-family: inherit;
+    }
+    .modal input:focus, .modal select:focus, .modal textarea:focus {
+      outline: none; border-color: #d4a857;
+    }
+    .modal textarea { resize: vertical; min-height: 60px; }
+    .modal-actions {
+      display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end;
+    }
+    .modal-actions button {
+      padding: 9px 16px; border-radius: 8px; font-size: 14px;
+      cursor: pointer; border: none; font-weight: 500;
+    }
+    .btn-cancel { background: #2a2a32; color: #e8e8ea; }
+    .btn-save { background: #d4a857; color: #1a1a1f; }
+    .btn-save:active { background: #b58d3f; }
+    .btn-danger { background: #3a1f1f; color: #e05a5a; }
+    .btn-danger:active { background: #4a2020; }
+
+    .day-group-title {
+      font-size: 12px; color: #8a8a96; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-top: 14px; margin-bottom: 6px;
+      padding-left: 2px;
+    }
+    .day-group-title:first-child { margin-top: 0; }
+
+    @media (max-width: 640px) {
+      .locations { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <h1>Расписание смен</h1>
+      <div class="header-actions">
+        <div class="user-badge" id="userBadge">…</div>
+        <button class="btn-add" id="btnAddBooking" style="display:none" onclick="openBookingModal()">+ Бронь</button>
+        <button class="btn-remove" id="btnRemoveBooking" style="display:none" onclick="openRemoveModal()">− Бронь</button>
+      </div>
+    </div>
+    <div class="week-nav">
+      <button onclick="changeWeek(-1)">←</button>
+      <div class="week-range" id="weekRange">—</div>
+      <button onclick="changeWeek(1)">→</button>
+    </div>
+    <div class="week-days" id="weekDays"></div>
+  </header>
+
+  <div id="schedule"><div class="loading">Загрузка…</div></div>
+  <div class="toast" id="toast"></div>
+
+  <!-- Модальное окно: добавление брони -->
+  <div class="modal-overlay" id="bookingModal">
+    <div class="modal">
+      <h3>Новая бронь</h3>
+
+      <label>Локация</label>
+      <select id="f_location">
+        <option value="Свобода">Свобода</option>
+        <option value="Плехановская">Плехановская</option>
+      </select>
+
+      <label>Дата</label>
+      <input type="date" id="f_date">
+
+      <label>Время</label>
+      <select id="f_time"></select>
+
+      <label>Квест</label>
+      <select id="f_quest"></select>
+
+      <label>Комментарий (необязательно)</label>
+      <textarea id="f_comment" placeholder="Дополнительная информация"></textarea>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeBookingModal()">Отмена</button>
+        <button class="btn-save" onclick="saveBooking()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно: список броней на неделю -->
+  <div class="modal-overlay" id="removeModal">
+    <div class="modal">
+      <h3>Удаление броней</h3>
+      <p style="font-size:13px; color:#8a8a96; margin-bottom:8px;">
+        Неделя: <span id="removeWeek">—</span>
+      </p>
+      <div id="removeList" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeRemoveModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно: управление слотом (для админа) -->
+  <div class="modal-overlay" id="slotModal">
+    <div class="modal">
+      <h3>Управление слотом</h3>
+      <p style="font-size:13px; color:#8a8a96; margin-bottom:12px;">
+        <span id="slotInfo">—</span>
+      </p>
+      <div id="slotStaffList" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeSlotModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+
+    const LOCATIONS = ['Свобода', 'Плехановская'];
+    const QUEST_BY_LOCATION = {
+      'Свобода': ['Пиковая дама', 'Сверхъестественное'],
+      'Плехановская': ['Бабадук', 'Поиграй со мной', 'Проклятье Анабель'],
+    };
+    const SLOT_TIMES = ['10:00','11:30','13:00','14:30','16:00','17:30','19:00','20:30','22:00'];
+    const DAY_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const MONTH_NAMES = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+
+    let today = new Date(); today.setHours(0,0,0,0);
+    let weekStart = getMonday(new Date(today));
+    let selectedDate = new Date(today);
+    let scheduleData = {};
+    let currentUser = null;
+
+    const IS_TELEGRAM = !!(tg && tg.initData);
+    const DEBUG_USER_ID = 1;
+
+    function getMonday(d) {
+      const date = new Date(d);
+      const day = date.getDay();
+      const diff = (day === 0 ? -6 : 1 - day);
+      date.setDate(date.getDate() + diff);
+      date.setHours(0,0,0,0);
+      return date;
+    }
+
+    function formatKey(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function sameDay(a, b) {
+      return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+    }
+
+    function showToast(text, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = text;
+      toast.className = 'toast show' + (isError ? ' error' : '');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => { toast.className = 'toast'; }, 2200);
+    }
+
+    function askConfirm(text) {
+      return new Promise((resolve) => {
+        if (IS_TELEGRAM && tg && typeof tg.showConfirm === 'function') {
+          tg.showConfirm(text, (confirmed) => resolve(confirmed));
+        } else {
+          resolve(window.confirm(text));
+        }
+      });
+    }
+
+    // --- Авторизация ---
+    async function authorize() {
+      if (!IS_TELEGRAM) {
+        currentUser = { id: DEBUG_USER_ID, first_name: 'Тестовый Гость', is_admin: 1 };
+        updateUserBadge();
+        return;
+      }
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData: tg.initData }),
+        });
+        const json = await res.json();
+        currentUser = json.ok ? json.user : { first_name: 'Гость', is_admin: 0 };
+      } catch (err) {
+        console.error(err);
+        currentUser = { first_name: 'Гость', is_admin: 0 };
+      }
+      updateUserBadge();
+    }
+
+    function updateUserBadge() {
+      const badge = document.getElementById('userBadge');
+      const btnAdd = document.getElementById('btnAddBooking');
+      const btnRemove = document.getElementById('btnRemoveBooking');
+      if (!currentUser) { badge.textContent = '…'; return; }
+      badge.textContent = currentUser.is_admin
+        ? `${currentUser.first_name} · админ`
+        : currentUser.first_name;
+      if (currentUser.is_admin) {
+        badge.classList.add('admin');
+        btnAdd.style.display = 'block';
+        btnRemove.style.display = 'block';
+      } else {
+        badge.classList.remove('admin');
+        btnAdd.style.display = 'none';
+        btnRemove.style.display = 'none';
+      }
+    }
+
+    // --- Расписание ---
+    async function loadSchedule() {
+      const from = formatKey(weekStart);
+      try {
+        const res = await fetch(`/api/schedule?from=${from}&days=7`);
+        const json = await res.json();
+        scheduleData = json.data;
+      } catch (err) {
+        console.error(err);
+        scheduleData = {};
+      }
+    }
+
+    async function changeWeek(delta) {
+      weekStart.setDate(weekStart.getDate() + delta * 7);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      if (selectedDate < weekStart || selectedDate > weekEnd) selectedDate = new Date(weekStart);
+      await loadSchedule();
+      render();
+    }
+
+    function selectDay(d) { selectedDate = new Date(d); render(); }
+
+    // --- Запись/отписка ---
+    async function clickSlot(location, time, isMine, isFull) {
+      if (!currentUser || !currentUser.id) { showToast('Авторизуйтесь в Telegram', true); return; }
+      if (!isMine && isFull) { showToast('Слот заполнен (4/4)', true); return; }
+
+      const confirmText = isMine
+        ? `Отказаться от слота?\n${location}, ${time}`
+        : `Записаться на слот?\n${location}, ${time}`;
+      if (!await askConfirm(confirmText)) return;
+
+      const slot_date = formatKey(selectedDate);
+      const method = isMine ? 'DELETE' : 'POST';
+
+      try {
+        const res = await fetch('/api/shift', {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot_date, slot_time: time, location, user_id: currentUser.id }),
+        });
+        const json = await res.json();
+        if (!json.ok) { showToast(json.error || 'Ошибка', true); return; }
+        showToast(isMine ? 'Вы отписались' : 'Вы записаны');
+        await loadSchedule();
+        render();
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети', true);
+      }
+    }
+
+    // --- Окно управления слотом (админ) ---
+    function openSlotModal(location, time, staff) {
+      const dateKey = formatKey(selectedDate);
+      document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
+
+      const list = document.getElementById('slotStaffList');
+      list.innerHTML = '';
+
+      staff.forEach(s => {
+        const item = document.createElement('div');
+        item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
+        const isSelf = s.id === currentUser.id;
+        item.innerHTML = `
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:14px; font-weight:600;">${s.name}${isSelf ? ' (вы)' : ''}</div>
+          </div>
+          ${isSelf ? '' : '<button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Снять</button>'}
+        `;
+        if (!isSelf) {
+          item.querySelector('button').onclick = () => removeStaffFromSlot(location, time, s.id);
+        }
+        list.appendChild(item);
+      });
+
+      document.getElementById('slotModal').classList.add('show');
+    }
+
+    function closeSlotModal() {
+      document.getElementById('slotModal').classList.remove('show');
+    }
+
+    async function removeStaffFromSlot(location, time, targetUserId) {
+      if (!await askConfirm('Снять сотрудника со слота?')) return;
+
+      const slot_date = formatKey(selectedDate);
+      try {
+        const res = await fetch('/api/shift/admin', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slot_date, slot_time: time, location,
+            admin_id: currentUser.id,
+            target_user_id: targetUserId,
+          }),
+        });
+        const json = await res.json();
+        if (!json.ok) { showToast(json.error || 'Ошибка', true); return; }
+        showToast('Сотрудник снят');
+        await loadSchedule();
+        render();
+        closeSlotModal();
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети', true);
+      }
+    }
+
+    // --- Модальное окно добавления брони ---
+    function openBookingModal() {
+      if (!currentUser?.is_admin) return;
+
+      document.getElementById('f_date').value = formatKey(selectedDate);
+      document.getElementById('f_location').value = 'Свобода';
+      fillTimes();
+      fillQuests();
+
+      document.getElementById('f_comment').value = '';
+
+      document.getElementById('bookingModal').classList.add('show');
+    }
+
+    function closeBookingModal() {
+      document.getElementById('bookingModal').classList.remove('show');
+    }
+
+    function fillTimes() {
+      const sel = document.getElementById('f_time');
+      sel.innerHTML = SLOT_TIMES.map(t => `<option value="${t}">${t}</option>`).join('');
+    }
+
+    function fillQuests() {
+      const loc = document.getElementById('f_location').value;
+      const quests = QUEST_BY_LOCATION[loc] || [];
+      const sel = document.getElementById('f_quest');
+      sel.innerHTML = quests.map(q => `<option value="${q}">${q}</option>`).join('');
+    }
+
+    document.getElementById('f_location').addEventListener('change', fillQuests);
+
+    async function saveBooking() {
+      const slot_date = document.getElementById('f_date').value;
+      const slot_time = document.getElementById('f_time').value;
+      const location = document.getElementById('f_location').value;
+      const quest_name = document.getElementById('f_quest').value;
+      const comment = document.getElementById('f_comment').value.trim() || null;
+
+      if (!slot_date || !slot_time || !location || !quest_name) {
+        showToast('Заполните обязательные поля', true);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/client-booking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot_date, slot_time, location, quest_name, comment }),
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          showToast(json.error || 'Ошибка', true);
+          return;
+        }
+        showToast('Бронь добавлена');
+        closeBookingModal();
+        await loadSchedule();
+        render();
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети', true);
+      }
+    }
+
+    // --- Модальное окно удаления броней (на всю неделю) ---
+    async function openRemoveModal() {
+      if (!currentUser?.is_admin) return;
+
+      const from = formatKey(weekStart);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      document.getElementById('removeWeek').textContent =
+        `${weekStart.getDate()} ${MONTH_NAMES[weekStart.getMonth()]} — ${weekEnd.getDate()} ${MONTH_NAMES[weekEnd.getMonth()]}`;
+
+      const list = document.getElementById('removeList');
+      list.innerHTML = '<p style="color:#8a8a96; font-size:14px; text-align:center; padding:20px 0;">Загрузка…</p>';
+
+      document.getElementById('removeModal').classList.add('show');
+
+      try {
+        const res = await fetch(`/api/schedule?from=${from}&days=7`);
+        const json = await res.json();
+        const allData = json.data || {};
+
+        list.innerHTML = '';
+
+        const days = Object.keys(allData).sort();
+        let totalBookings = 0;
+
+        days.forEach(dateKey => {
+          const dayData = allData[dateKey] || {};
+          const bookings = [];
+
+          LOCATIONS.forEach(loc => {
+            SLOT_TIMES.forEach(time => {
+              const key = `${loc}|${time}`;
+              const data = dayData[key];
+              if (data && data.quest && data.booking_id) {
+                bookings.push({
+                  bookingId: data.booking_id,
+                  location: loc,
+                  time: time,
+                  quest: data.quest,
+                  comment: data.comment || null,
+                });
+              }
+            });
+          });
+
+          if (bookings.length === 0) return;
+          totalBookings += bookings.length;
+
+          const d = new Date(dateKey + 'T00:00:00');
+          const title = document.createElement('div');
+          title.className = 'day-group-title';
+          title.textContent = `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+          list.appendChild(title);
+
+          bookings.forEach(b => {
+            const item = document.createElement('div');
+            item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
+            item.innerHTML = `
+              <div style="flex:1; min-width:0;">
+                <div style="font-size:14px; font-weight:600; margin-bottom:3px;">${b.time} · ${b.quest}</div>
+                <div style="font-size:12px; color:#8a8a96;">${b.location}${b.comment ? ' · ' + b.comment : ''}</div>
+              </div>
+              <button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Удалить</button>
+            `;
+            item.querySelector('button').onclick = () => deleteBookingFromList(b.bookingId);
+            list.appendChild(item);
+          });
+        });
+
+        if (totalBookings === 0) {
+          list.innerHTML = '<p style="color:#8a8a96; font-size:14px; text-align:center; padding:20px 0;">На эту неделю броней нет</p>';
+        }
+      } catch (err) {
+        console.error(err);
+        list.innerHTML = '<p style="color:#e05a5a; font-size:14px; text-align:center; padding:20px 0;">Ошибка загрузки</p>';
+      }
+    }
+
+    function closeRemoveModal() {
+      document.getElementById('removeModal').classList.remove('show');
+    }
+
+    async function deleteBookingFromList(bookingId) {
+      if (!bookingId) { showToast('Ошибка: нет id брони', true); return; }
+      try {
+        const res = await fetch(`/api/client-booking/${bookingId}`, { method: 'DELETE' });
+        const json = await res.json();
+        if (!json.ok) { showToast(json.error || 'Ошибка', true); return; }
+        showToast('Бронь удалена');
+        await loadSchedule();
+        render();
+        await openRemoveModal();
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети', true);
+      }
+    }
+
+    // --- Рендер ---
+    function renderWeek() {
+      const daysEl = document.getElementById('weekDays');
+      daysEl.innerHTML = '';
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      document.getElementById('weekRange').textContent =
+        `${weekStart.getDate()} ${MONTH_NAMES[weekStart.getMonth()]} — ${weekEnd.getDate()} ${MONTH_NAMES[weekEnd.getMonth()]}`;
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        const btn = document.createElement('button');
+        btn.className = 'day-btn';
+        if (sameDay(d, selectedDate)) btn.classList.add('active');
+        if (sameDay(d, today)) btn.classList.add('today');
+        btn.innerHTML = `
+          <span class="day-name">${DAY_NAMES[d.getDay()]}</span>
+          <span class="day-num">${d.getDate()}</span>
+        `;
+        btn.onclick = () => selectDay(d);
+        daysEl.appendChild(btn);
+      }
+    }
+
+    function renderSchedule() {
+      const container = document.getElementById('schedule');
+      container.innerHTML = '';
+      const dateKey = formatKey(selectedDate);
+      const dayData = scheduleData[dateKey] || {};
+
+      LOCATIONS.forEach(loc => {
+        const locEl = document.createElement('div');
+        locEl.className = 'location';
+        locEl.innerHTML = `<h2>${loc}</h2>`;
+        const slotsEl = document.createElement('div');
+        slotsEl.className = 'slots';
+
+        SLOT_TIMES.forEach(time => {
+          const key = `${loc}|${time}`;
+          const data = dayData[key] || { quest: null, staff: [] };
+          const isBooked = !!data.quest;
+          const staffCount = data.staff.length;
+          const isMine = currentUser && data.staff.some(s => s.id === currentUser.id);
+          const isFull = staffCount >= 4;
+          const staffNames = data.staff.map(s => s.name).join(', ');
+
+          let cls = 'slot';
+          if (isMine) cls += ' mine';
+          else if (isBooked) cls += ' booked';
+          if (isFull) cls += ' full';
+
+          const slot = document.createElement('div');
+          slot.className = cls;
+          slot.innerHTML = `
+            <div class="slot-time">${time}</div>
+            <div class="slot-info">
+              <div class="slot-quest${isBooked ? '' : ' empty'}">${isBooked ? data.quest : 'игры нет'}</div>
+              <div class="slot-staff">${staffCount > 0 ? staffNames : 'сотрудник отсутствует'}</div>
+            </div>
+            <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
+          `;
+
+          // Кнопка управления слотом — только для админа и только если есть сотрудники
+          if (currentUser?.is_admin && staffCount > 0) {
+            const manageBtn = document.createElement('button');
+            manageBtn.className = 'slot-manage';
+            manageBtn.textContent = '⋮';
+            manageBtn.title = 'Управление сотрудниками';
+            manageBtn.onclick = (e) => {
+              e.stopPropagation();
+              openSlotModal(loc, time, data.staff);
+            };
+            slot.appendChild(manageBtn);
+          }
+
+          // Клик по остальной части слота — запись/отписка
+          slot.onclick = (e) => {
+            if (e.target.classList.contains('slot-manage')) return;
+            clickSlot(loc, time, isMine, isFull);
+          };
+
+          slotsEl.appendChild(slot);
+        });
+
+        locEl.appendChild(slotsEl);
+        container.appendChild(locEl);
+      });
+    }
+
+    function render() { renderWeek(); renderSchedule(); }
+
+    (async () => {
+      await authorize();
+      await loadSchedule();
+      render();
+    })();
+  </script>
+</body>
+</html>

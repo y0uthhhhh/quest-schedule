@@ -1,0 +1,23 @@
+{
+  "name": "quest-schedule",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-telegram-bot-api": "^1.2.0"
+  }
+}
