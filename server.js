@@ -39,19 +39,6 @@ function safeNum(v) {
 // --- Ping ---
 app.get('/api/ping', (req, res) => res.json({ status: 'ok' }));
 
-// --- ВРЕМЕННЫЙ отладочный роут: создаёт тестового сотрудника ---
-app.post('/api/debug-create-user', async (req, res) => {
-  try {
-    const info = await db.execute({
-      sql: `INSERT INTO users (telegram_id, first_name, username, is_admin)
-            VALUES (?, ?, ?, ?)`,
-      args: ['debug-1', 'Тестовый Гость', 'debug', 1],
-    });
-    res.json({ ok: true, id: Number(info.lastInsertRowid) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // --- Авторизация через Telegram ---
 function verifyTelegramAuth(initData) {
