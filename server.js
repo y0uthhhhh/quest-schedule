@@ -30,15 +30,77 @@ bot.on('polling_error', (err) => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Утилита: безопасное число ---
+// ============ УТИЛИТЫ ============
+
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// --- Ping ---
-app.get('/api/ping', (req, res) => res.json({ status: 'ok' }));
+// Текущее время в часовом поясе приложения (Россия, Москва)
+function now() {
+  return new Date();
+}
 
+// Формат даты YYYY-MM-DD
+function formatDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Получить начало текущей недели (понедельник)
+function getMonday(d) {
+  const date = new Date(d);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay(); // 0 = Вс
+  const diff = (day === 0 ? -6 : 1 - day);
+  date.setDate(date.getDate() + diff);
+  return date;
+}
+
+// Последняя доступная для брони дата: конец следующей недели (воскресенье)
+function getBookingWindowEnd() {
+  const monday = getMonday(now());
+  // Понедельник текущей недели + 13 дней = воскресенье следующей недели
+  const end = new Date(monday);
+  end.setDate(end.getDate() + 13);
+  return end;
+}
+
+// Открыта ли дата для бронирования (не закрыта окном)
+function isSlotOpen(dateStr) {
+  const end = getBookingWindowEnd();
+  const endKey = formatDateKey(end);
+  return dateStr <= endKey;
+}
+
+// Является ли слот архивным (время начала уже прошло)
+function isArchived(dateStr, timeStr) {
+  const dt = new Date(`${dateStr}T${timeStr}:00`);
+  return dt < now();
+}
+
+// До начала меньше 72 часов?
+function isWithin72Hours(dateStr, timeStr) {
+  const dt = new Date(`${dateStr}T${timeStr}:00`);
+  const diffMs = dt.getTime() - now().getTime();
+  return diffMs < 72 * 60 * 60 * 1000;
+}
+
+// Статус слота для фронта
+function getSlotStatus(dateStr, timeStr) {
+  if (isArchived(dateStr, timeStr)) return 'archived';
+  if (!isSlotOpen(dateStr)) return 'closed';
+  return 'active';
+}
+
+// ============ API ============
+
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'ok', now: now().toISOString(), windowEnd: formatDateKey(getBookingWindowEnd()) });
+});
 
 // --- Авторизация через Telegram ---
 function verifyTelegramAuth(initData) {
@@ -125,10 +187,7 @@ app.get('/api/schedule', async (req, res) => {
     for (let i = 0; i < numDays; i++) {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      dates.push(`${y}-${m}-${day}`);
+      dates.push(formatDateKey(d));
     }
 
     const placeholders = dates.map(() => '?').join(',');
@@ -165,20 +224,35 @@ app.get('/api/schedule', async (req, res) => {
       result[s.slot_date][key].staff.push({ id: Number(s.user_id), name: s.first_name });
     }
 
-    res.json({ dates, data: result });
+    const windowEnd = formatDateKey(getBookingWindowEnd());
+    res.json({ dates, data: result, windowEnd });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
 
-// --- Добавить клиентскую бронь ---
+// --- Добавить клиентскую бронь (только админ) ---
 app.post('/api/client-booking', async (req, res) => {
   try {
-    const { slot_date, slot_time, location, quest_name } = req.body;
+    const { slot_date, slot_time, location, quest_name, admin_id } = req.body;
     const comment = req.body.comment || null;
+
     if (!slot_date || !slot_time || !location || !quest_name) {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, quest_name' });
+    }
+
+    // Проверяем, что запрос от админа
+    const adminIdNum = safeNum(admin_id);
+    if (adminIdNum === null) {
+      return res.status(403).json({ error: 'Нужен admin_id' });
+    }
+    const adminRes = await db.execute({
+      sql: 'SELECT is_admin FROM users WHERE id = ?',
+      args: [adminIdNum],
+    });
+    if (adminRes.rows.length === 0 || !adminRes.rows[0].is_admin) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
     }
 
     const info = await db.execute({
@@ -198,7 +272,7 @@ app.post('/api/client-booking', async (req, res) => {
   }
 });
 
-// --- Удалить клиентскую бронь ---
+// --- Удалить клиентскую бронь (только админ) ---
 app.delete('/api/client-booking/:id', async (req, res) => {
   try {
     const id = safeNum(req.params.id);
@@ -208,6 +282,90 @@ app.delete('/api/client-booking/:id', async (req, res) => {
       sql: 'DELETE FROM client_bookings WHERE id = ?',
       args: [id],
     });
+    res.json({ ok: true, deleted: info.rowsAffected });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка базы данных' });
+  }
+});
+
+// --- Запись сотрудника на слот ---
+app.post('/api/shift', async (req, res) => {
+  try {
+    const { slot_date, slot_time, location } = req.body;
+    const user_id = safeNum(req.body.user_id);
+    if (!slot_date || !slot_time || !location || user_id === null) {
+      return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
+    }
+
+    // Проверки статуса слота
+    if (isArchived(slot_date, slot_time)) {
+      return res.status(400).json({ error: 'Этот слот уже прошёл' });
+    }
+    if (!isSlotOpen(slot_date)) {
+      return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
+    }
+
+    // Проверяем лимит 4 человека
+    const countRes = await db.execute({
+      sql: `SELECT COUNT(*) as cnt FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ?`,
+      args: [slot_date, slot_time, location],
+    });
+    if (Number(countRes.rows[0].cnt) >= 4) {
+      return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
+    }
+
+    // Проверяем дубликат
+    const existRes = await db.execute({
+      sql: `SELECT id FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
+      args: [slot_date, slot_time, location, user_id],
+    });
+    if (existRes.rows.length > 0) {
+      return res.status(409).json({ error: 'Вы уже записаны на этот слот' });
+    }
+
+    const info = await db.execute({
+      sql: `INSERT INTO staff_shifts (slot_date, slot_time, location, user_id)
+            VALUES (?, ?, ?, ?)`,
+      args: [slot_date, slot_time, location, user_id],
+    });
+
+    // Возвращаем признак «близко к игре»
+    const warning = isWithin72Hours(slot_date, slot_time)
+      ? 'До игры меньше 72 часов, снять вас сможет только админ'
+      : null;
+
+    res.json({ ok: true, id: Number(info.lastInsertRowid), warning });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка базы данных' });
+  }
+});
+
+// --- Отписка сотрудника (самостоятельная) ---
+app.delete('/api/shift', async (req, res) => {
+  try {
+    const { slot_date, slot_time, location } = req.body;
+    const user_id = safeNum(req.body.user_id);
+    if (!slot_date || !slot_time || !location || user_id === null) {
+      return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
+    }
+
+    // Проверка 72 часов
+    if (isWithin72Hours(slot_date, slot_time)) {
+      return res.status(403).json({
+        error: 'До игры меньше 72 часов. Снять вас может только админ',
+      });
+    }
+
+    const info = await db.execute({
+      sql: `DELETE FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
+      args: [slot_date, slot_time, location, user_id],
+    });
+
     res.json({ ok: true, deleted: info.rowsAffected });
   } catch (err) {
     console.error(err);
@@ -226,7 +384,6 @@ app.delete('/api/shift/admin', async (req, res) => {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, admin_id, target_user_id' });
     }
 
-    // Проверяем, что admin_id — действительно админ
     const adminRes = await db.execute({
       sql: 'SELECT is_admin FROM users WHERE id = ?',
       args: [admin_id],
@@ -248,69 +405,7 @@ app.delete('/api/shift/admin', async (req, res) => {
   }
 });
 
-// --- Запись сотрудника на слот ---
-app.post('/api/shift', async (req, res) => {
-  try {
-    const { slot_date, slot_time, location } = req.body;
-    const user_id = safeNum(req.body.user_id);
-    if (!slot_date || !slot_time || !location || user_id === null) {
-      return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
-    }
-
-    const countRes = await db.execute({
-      sql: `SELECT COUNT(*) as cnt FROM staff_shifts
-            WHERE slot_date = ? AND slot_time = ? AND location = ?`,
-      args: [slot_date, slot_time, location],
-    });
-    if (Number(countRes.rows[0].cnt) >= 4) {
-      return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
-    }
-
-    const existRes = await db.execute({
-      sql: `SELECT id FROM staff_shifts
-            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
-      args: [slot_date, slot_time, location, user_id],
-    });
-    if (existRes.rows.length > 0) {
-      return res.status(409).json({ error: 'Вы уже записаны на этот слот' });
-    }
-
-    const info = await db.execute({
-      sql: `INSERT INTO staff_shifts (slot_date, slot_time, location, user_id)
-            VALUES (?, ?, ?, ?)`,
-      args: [slot_date, slot_time, location, user_id],
-    });
-
-    res.json({ ok: true, id: Number(info.lastInsertRowid) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка базы данных' });
-  }
-});
-
-// --- Отписка сотрудника ---
-app.delete('/api/shift', async (req, res) => {
-  try {
-    const { slot_date, slot_time, location } = req.body;
-    const user_id = safeNum(req.body.user_id);
-    if (!slot_date || !slot_time || !location || user_id === null) {
-      return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
-    }
-
-    const info = await db.execute({
-      sql: `DELETE FROM staff_shifts
-            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
-      args: [slot_date, slot_time, location, user_id],
-    });
-
-    res.json({ ok: true, deleted: info.rowsAffected });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка базы данных' });
-  }
-});
-
-// --- Webhook для Telegram (только для production) ---
+// --- Webhook для Telegram ---
 app.post('/api/telegram-webhook', (req, res) => {
   try {
     bot.processUpdate(req.body);
@@ -327,6 +422,7 @@ app.post('/api/telegram-webhook', (req, res) => {
     await initDb();
     app.listen(PORT, () => {
       console.log(`✅ Сервер запущен: http://localhost:${PORT}`);
+      console.log(`📅 Окно бронирования до: ${formatDateKey(getBookingWindowEnd())}`);
       if (process.env.NODE_ENV === 'production') {
         console.log(`🤖 Бот в режиме webhook.`);
       } else {
