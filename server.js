@@ -678,53 +678,6 @@ app.post('/api/shift', async (req, res) => {
   }
 });
 
-    // Проверки статуса слота (для админа — не проверяем архив и окно)
-    if (!isAdmin) {
-      if (isArchived(slot_date, slot_time)) {
-        return res.status(400).json({ error: 'Этот слот уже прошёл' });
-      }
-      if (!isSlotOpen(slot_date)) {
-        return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
-      }
-    }
-
-    // Проверяем лимит 4 человека
-    const countRes = await db.execute({
-      sql: `SELECT COUNT(*) as cnt FROM staff_shifts
-            WHERE slot_date = ? AND slot_time = ? AND location = ?`,
-      args: [slot_date, slot_time, location],
-    });
-    if (Number(countRes.rows[0].cnt) >= 4) {
-      return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
-    }
-
-    // Проверяем дубликат
-    const existRes = await db.execute({
-      sql: `SELECT id FROM staff_shifts
-            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
-      args: [slot_date, slot_time, location, user_id],
-    });
-    if (existRes.rows.length > 0) {
-      return res.status(409).json({ error: 'Этот сотрудник уже записан на слот' });
-    }
-
-    const info = await db.execute({
-      sql: `INSERT INTO staff_shifts (slot_date, slot_time, location, user_id)
-            VALUES (?, ?, ?, ?)`,
-      args: [slot_date, slot_time, location, user_id],
-    });
-
-    const warning = (!isAdmin && isWithin72Hours(slot_date, slot_time))
-      ? 'До игры меньше 72 часов, снять вас сможет только админ'
-      : null;
-
-    res.json({ ok: true, id: Number(info.lastInsertRowid), warning });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка базы данных' });
-  }
-});
-
 // --- Отписка сотрудника (самостоятельная) ---
 app.delete('/api/shift', async (req, res) => {
   try {
