@@ -321,6 +321,38 @@ app.get('/api/my-shifts', async (req, res) => {
   }
 });
 
+// --- Список сотрудников (только админ) ---
+app.get('/api/users', async (req, res) => {
+  try {
+    const { admin_id } = req.query;
+    const adminId = safeNum(admin_id);
+    if (adminId === null) {
+      return res.status(403).json({ error: 'Нужен admin_id' });
+    }
+    const adminRes = await db.execute({
+      sql: 'SELECT is_admin FROM users WHERE id = ?',
+      args: [adminId],
+    });
+    if (adminRes.rows.length === 0 || !adminRes.rows[0].is_admin) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const usersRes = await db.execute({
+      sql: 'SELECT id, first_name, username FROM users ORDER BY first_name ASC',
+      args: [],
+    });
+    res.json({
+      users: usersRes.rows.map(u => ({
+        id: Number(u.id),
+        name: u.first_name,
+        username: u.username,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 // --- Добавить клиентскую бронь (только админ) ---
 app.post('/api/client-booking', async (req, res) => {
   try {
@@ -508,17 +540,33 @@ app.post('/api/shift', async (req, res) => {
   try {
     const { slot_date, slot_time, location } = req.body;
     const user_id = safeNum(req.body.user_id);
+    const admin_id = req.body.admin_id ? safeNum(req.body.admin_id) : null;
+
     if (!slot_date || !slot_time || !location || user_id === null) {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
     }
 
-    if (isArchived(slot_date, slot_time)) {
-      return res.status(400).json({ error: 'Этот слот уже прошёл' });
-    }
-    if (!isSlotOpen(slot_date)) {
-      return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
+    // Проверяем, админ ли делает запрос
+    let isAdmin = false;
+    if (admin_id !== null) {
+      const adminRes = await db.execute({
+        sql: 'SELECT is_admin FROM users WHERE id = ?',
+        args: [admin_id],
+      });
+      isAdmin = adminRes.rows.length > 0 && !!adminRes.rows[0].is_admin;
     }
 
+    // Проверки статуса слота (для админа — не проверяем архив и окно)
+    if (!isAdmin) {
+      if (isArchived(slot_date, slot_time)) {
+        return res.status(400).json({ error: 'Этот слот уже прошёл' });
+      }
+      if (!isSlotOpen(slot_date)) {
+        return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
+      }
+    }
+
+    // Проверяем лимит 4 человека
     const countRes = await db.execute({
       sql: `SELECT COUNT(*) as cnt FROM staff_shifts
             WHERE slot_date = ? AND slot_time = ? AND location = ?`,
@@ -528,13 +576,14 @@ app.post('/api/shift', async (req, res) => {
       return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
     }
 
+    // Проверяем дубликат
     const existRes = await db.execute({
       sql: `SELECT id FROM staff_shifts
             WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
       args: [slot_date, slot_time, location, user_id],
     });
     if (existRes.rows.length > 0) {
-      return res.status(409).json({ error: 'Вы уже записаны на этот слот' });
+      return res.status(409).json({ error: 'Этот сотрудник уже записан на слот' });
     }
 
     const info = await db.execute({
@@ -543,7 +592,129 @@ app.post('/api/shift', async (req, res) => {
       args: [slot_date, slot_time, location, user_id],
     });
 
-    const warning = isWithin72Hours(slot_date, slot_time)
+    const warning = (!isAdmin && isWithin72Hours(slot_date, slot_time))
+      ? 'До игры меньше 72 часов, снять вас сможет только админ'
+      : null;
+
+    res.json({ ok: true, id: Number(info.lastInsertRowid), warning });
+
+    // --- Уведомления при админском назначении ---
+    if (isAdmin) {
+      try {
+        // Данные сотрудника
+        const userRes = await db.execute({
+          sql: 'SELECT telegram_id, first_name, username FROM users WHERE id = ?',
+          args: [user_id],
+        });
+        if (userRes.rows.length === 0) return;
+        const targetUser = userRes.rows[0];
+
+        const dateHuman = formatDateHuman(slot_date, slot_time);
+
+        // Проверяем, есть ли бронь на слоте
+        const bookingRes = await db.execute({
+          sql: `SELECT id, quest_name, comment FROM client_bookings
+                WHERE slot_date = ? AND slot_time = ? AND location = ?`,
+          args: [slot_date, slot_time, location],
+        });
+        const booking = bookingRes.rows[0] || null;
+
+        // 1. В личку сотруднику — ВСЕГДА
+        let personalText;
+        if (booking) {
+          // Есть бронь — полное уведомление об игре
+          const commentLine = booking.comment ? `\n💬 Комментарий: ${booking.comment}` : '';
+          personalText =
+            `🎮 Тебя назначили на игру!\n\n` +
+            `📍 Локация: ${location}\n` +
+            `🎯 Квест: ${booking.quest_name}\n` +
+            `📅 ${dateHuman}` +
+            commentLine +
+            `\n\nТы ответственный за этот слот.`;
+        } else {
+          // Брони нет — просто уведомление о назначении
+          personalText =
+            `📋 Тебя назначили на слот\n\n` +
+            `📍 Локация: ${location}\n` +
+            `📅 ${dateHuman}\n\n` +
+            `Пока игры нет, но ты ответственный за слот.`;
+        }
+        await sendTelegramMessage(targetUser.telegram_id, personalText);
+
+        // 2. В беседу — ТОЛЬКО если есть бронь
+        if (booking) {
+          const chatId = process.env.TELEGRAM_CHAT_ID;
+          const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
+          if (chatId) {
+            const mention = targetUser.username ? `@${targetUser.username}` : targetUser.first_name;
+            const commentLine = booking.comment ? `\n💬 Комментарий: ${booking.comment}` : '';
+            const botLink = process.env.TELEGRAM_BOT_LINK
+              ? `\n\n👉 <a href="${process.env.TELEGRAM_BOT_LINK}">Открыть расписание</a>`
+              : '';
+
+            const groupText =
+              `🎮 Назначен ответственный\n\n` +
+              `📍 Локация: ${location}\n` +
+              `🎯 Квест: ${booking.quest_name}\n` +
+              `📅 ${dateHuman}\n` +
+              `👥 Ответственный: ${mention}` +
+              commentLine +
+              botLink;
+
+            const opts = threadId
+              ? { message_thread_id: threadId, parse_mode: 'HTML' }
+              : { parse_mode: 'HTML' };
+            await sendTelegramMessage(chatId, groupText, opts);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('⚠️ Ошибка уведомлений при назначении:', notifyErr.message);
+      }
+    }
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка базы данных' });
+  }
+});
+
+    // Проверки статуса слота (для админа — не проверяем архив и окно)
+    if (!isAdmin) {
+      if (isArchived(slot_date, slot_time)) {
+        return res.status(400).json({ error: 'Этот слот уже прошёл' });
+      }
+      if (!isSlotOpen(slot_date)) {
+        return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
+      }
+    }
+
+    // Проверяем лимит 4 человека
+    const countRes = await db.execute({
+      sql: `SELECT COUNT(*) as cnt FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ?`,
+      args: [slot_date, slot_time, location],
+    });
+    if (Number(countRes.rows[0].cnt) >= 4) {
+      return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
+    }
+
+    // Проверяем дубликат
+    const existRes = await db.execute({
+      sql: `SELECT id FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
+      args: [slot_date, slot_time, location, user_id],
+    });
+    if (existRes.rows.length > 0) {
+      return res.status(409).json({ error: 'Этот сотрудник уже записан на слот' });
+    }
+
+    const info = await db.execute({
+      sql: `INSERT INTO staff_shifts (slot_date, slot_time, location, user_id)
+            VALUES (?, ?, ?, ?)`,
+      args: [slot_date, slot_time, location, user_id],
+    });
+
+    const warning = (!isAdmin && isWithin72Hours(slot_date, slot_time))
       ? 'До игры меньше 72 часов, снять вас сможет только админ'
       : null;
 

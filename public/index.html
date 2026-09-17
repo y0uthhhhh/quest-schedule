@@ -603,28 +603,42 @@
     }
 
     function openSlotModal(location, time, staff) {
-  const dateKey = formatKey(selectedDate);
-  document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
+      const dateKey = formatKey(selectedDate);
+      document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
 
-  const list = document.getElementById('slotStaffList');
-  list.innerHTML = '';
+      const list = document.getElementById('slotStaffList');
+      list.innerHTML = '';
 
-  staff.forEach(s => {
-    const item = document.createElement('div');
-    item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
-    const isSelf = s.id === currentUser.id;
-    item.innerHTML = `
-      <div style="flex:1; min-width:0;">
-        <div style="font-size:14px; font-weight:600;">${s.name}${isSelf ? ' (вы)' : ''}</div>
-      </div>
-      <button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Снять</button>
-    `;
-    item.querySelector('button').onclick = () => removeStaffFromSlot(location, time, s.id);
-    list.appendChild(item);
-  });
+      if (staff.length === 0) {
+        list.innerHTML = '<p style="color:#8a8a96; font-size:13px; text-align:center; padding:8px 0;">Пока никто не записан</p>';
+      } else {
+        staff.forEach(s => {
+          const item = document.createElement('div');
+          item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
+          const isSelf = s.id === currentUser.id;
+          item.innerHTML = `
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:14px; font-weight:600;">${s.name}${isSelf ? ' (вы)' : ''}</div>
+            </div>
+            <button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Снять</button>
+          `;
+          item.querySelector('button').onclick = () => removeStaffFromSlot(location, time, s.id);
+          list.appendChild(item);
+        });
+      }
 
-  document.getElementById('slotModal').classList.add('show');
-}
+      // Кнопка «+ Добавить сотрудника» — если есть место
+      if (staff.length < 4) {
+        const addBtn = document.createElement('button');
+        addBtn.className = 'btn-save';
+        addBtn.style.cssText = 'width:100%; padding:10px; margin-top:10px;';
+        addBtn.textContent = '+ Добавить сотрудника';
+        addBtn.onclick = () => openAddStaffModal(location, time, staff);
+        list.appendChild(addBtn);
+      }
+
+      document.getElementById('slotModal').classList.add('show');
+    }
 
     function closeSlotModal() {
       document.getElementById('slotModal').classList.remove('show');
@@ -904,7 +918,7 @@
           if (staffCount === 0) cls += ' empty-staff';
           else if (staffCount === 1) cls += ' one-staff';
           else cls += ' ok-staff';
-          
+
           const commentLine = (isBooked && data.comment)
             ? `<div class="slot-comment">${data.comment}</div>`
             : '';
@@ -1044,6 +1058,83 @@
       loadSchedule().then(render);
     }
 
+        // --- Добавление сотрудника на слот (админ) ---
+    async function openAddStaffModal(location, time, currentStaff) {
+      const dateKey = formatKey(selectedDate);
+      const currentIds = currentStaff.map(s => s.id);
+
+      let users = [];
+      try {
+        const res = await fetch(`/api/users?admin_id=${currentUser.id}`);
+        const json = await res.json();
+        users = json.users || [];
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка загрузки сотрудников', true);
+        return;
+      }
+
+      // Убираем тех, кто уже на слоте
+      const available = users.filter(u => !currentIds.includes(u.id));
+
+      if (available.length === 0) {
+        showToast('Все сотрудники уже на слоте', true);
+        return;
+      }
+
+      // Строим временную модалку прямо в slotModal-е
+      const list = document.getElementById('slotStaffList');
+      list.innerHTML = '';
+      document.getElementById('slotInfo').textContent = `Добавить на ${dateKey} · ${location} · ${time}`;
+
+      available.forEach(u => {
+        const item = document.createElement('div');
+        item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
+        item.innerHTML = `
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:14px; font-weight:600;">${u.name}${u.username ? ' (@' + u.username + ')' : ''}</div>
+          </div>
+          <button class="btn-save" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Добавить</button>
+        `;
+        item.querySelector('button').onclick = () => addStaffToSlot(location, time, u.id);
+        list.appendChild(item);
+      });
+
+      const backBtn = document.createElement('button');
+      backBtn.className = 'btn-cancel';
+      backBtn.style.cssText = 'width:100%; padding:10px; margin-top:10px;';
+      backBtn.textContent = '← Назад';
+      backBtn.onclick = () => openSlotModal(location, time, currentStaff);
+      list.appendChild(backBtn);
+    }
+
+    // --- Сохранение: админ назначает сотрудника на слот ---
+    async function addStaffToSlot(location, time, targetUserId) {
+      const slot_date = formatKey(selectedDate);
+      try {
+        const res = await fetch('/api/shift', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slot_date, slot_time: time, location,
+            user_id: targetUserId,
+            admin_id: currentUser.id,
+          }),
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          showToast(json.error || 'Ошибка', true);
+          return;
+        }
+        showToast('Сотрудник добавлен');
+        await loadSchedule();
+        render();
+        closeSlotModal();
+      } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети', true);
+      }
+    }
 
     async function bootstrap() {
       await authorize();
