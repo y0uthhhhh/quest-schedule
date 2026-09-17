@@ -52,6 +52,32 @@
     .btn-add:active { background: #b58d3f; }
     .btn-remove { background: #3a1f1f; color: #e05a5a; border: none; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .btn-remove:active { background: #4a2020; }
+        .btn-my-shifts {
+      background: #2a2a32; color: #e8e8ea; border: none;
+      padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-my-shifts:active { background: #3a3a44; }
+    .filter-tabs {
+      display: flex; gap: 6px; margin-bottom: 14px;
+    }
+    .filter-tab {
+      flex: 1; background: #23232b; color: #8a8a96; border: 1px solid transparent;
+      padding: 7px 10px; border-radius: 8px; font-size: 13px; cursor: pointer;
+      text-align: center;
+    }
+    .filter-tab:active { background: #2a2a34; }
+    .filter-tab.active {
+      background: #3a3a44; color: #d4a857; border-color: #d4a857;
+    }
+    .my-shift-item {
+      background: #23232b; border-radius: 10px; padding: 12px;
+      margin-bottom: 8px; cursor: pointer;
+    }
+    .my-shift-item:active { background: #2a2a34; }
+    .my-shift-quest { color: #d4a857; font-size: 13px; margin-top: 3px; }
+    .my-shift-quest.empty { color: #6a6a76; font-style: italic; }
+    .my-shift-comment { color: #a88d5a; font-size: 11px; margin-top: 2px; }
     .month-label { text-align: center; font-size: 13px; color: #d4a857; letter-spacing: 0.5px; margin-bottom: 8px; }
     .week-nav { display: flex; align-items: center; gap: 8px; margin-top: 12px; margin-bottom: 8px; }
     .week-nav button { background: #2a2a32; color: #e8e8ea; border: none; padding: 6px 12px; border-radius: 8px; font-size: 15px; cursor: pointer; }
@@ -196,10 +222,9 @@
   </div>
 
   <header>
-    <div class="header-top">
-      <h1>Расписание смен</h1>
-      <div class="header-actions">
+          <div class="header-actions">
         <div class="user-badge" id="userBadge">…</div>
+        <button class="btn-my-shifts" id="btnMyShifts" onclick="openMyShiftsModal()">Мои слоты</button>
         <button class="btn-add" id="btnAddBooking" style="display:none" onclick="openBookingModal()">+ Бронь</button>
         <button class="btn-remove" id="btnRemoveBooking" style="display:none" onclick="openRemoveModal()">− Бронь</button>
       </div>
@@ -264,6 +289,25 @@
       <div id="slotStaffList" style="display:flex; flex-direction:column; gap:8px;"></div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeSlotModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+    <!-- Модальное окно: Мои слоты -->
+  <div class="modal-overlay" id="myShiftsModal">
+    <div class="modal">
+      <h3>Мои слоты</h3>
+
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all" onclick="setMyShiftsFilter('all')">Все</button>
+        <button class="filter-tab" data-filter="booked" onclick="setMyShiftsFilter('booked')">С играми</button>
+        <button class="filter-tab" data-filter="empty" onclick="setMyShiftsFilter('empty')">Пустые</button>
+      </div>
+
+      <div id="myShiftsList" style="display:flex; flex-direction:column; gap:8px;"></div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeMyShiftsModal()">Закрыть</button>
       </div>
     </div>
   </div>
@@ -427,10 +471,11 @@
       updateUserBadge();
     }
 
-    function updateUserBadge() {
+        function updateUserBadge() {
       const badge = document.getElementById('userBadge');
       const btnAdd = document.getElementById('btnAddBooking');
       const btnRemove = document.getElementById('btnRemoveBooking');
+      const btnMyShifts = document.getElementById('btnMyShifts');
       if (!currentUser) { badge.textContent = '…'; return; }
       badge.textContent = currentUser.is_admin
         ? `${currentUser.first_name} · админ`
@@ -444,6 +489,8 @@
         btnAdd.style.display = 'none';
         btnRemove.style.display = 'none';
       }
+      // Кнопка «Мои слоты» видна всем авторизованным
+      btnMyShifts.style.display = currentUser.id ? 'inline-block' : 'none';
     }
 
     async function loadSchedule() {
@@ -873,6 +920,95 @@
     }
 
     function render() { renderWeek(); renderSchedule(); }
+
+    // --- Мои слоты ---
+    let myShifts = [];
+    let myShiftsFilter = 'all';
+
+    async function openMyShiftsModal() {
+      if (!currentUser?.id) { showToast('Авторизуйтесь', true); return; }
+      document.getElementById('myShiftsModal').classList.add('show');
+
+      const list = document.getElementById('myShiftsList');
+      list.innerHTML = '<p style="color:#8a8a96; font-size:14px; text-align:center; padding:20px 0;">Загрузка…</p>';
+
+      try {
+        const res = await fetch(`/api/my-shifts?user_id=${currentUser.id}`);
+        const json = await res.json();
+        myShifts = json.shifts || [];
+      } catch (err) {
+        console.error(err);
+        myShifts = [];
+      }
+      renderMyShifts();
+    }
+
+    function closeMyShiftsModal() {
+      document.getElementById('myShiftsModal').classList.remove('show');
+    }
+
+    function setMyShiftsFilter(filter) {
+      myShiftsFilter = filter;
+      document.querySelectorAll('#myShiftsModal .filter-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.filter === filter);
+      });
+      renderMyShifts();
+    }
+
+    function renderMyShifts() {
+      const list = document.getElementById('myShiftsList');
+      list.innerHTML = '';
+
+      let filtered = myShifts;
+      if (myShiftsFilter === 'booked') filtered = myShifts.filter(s => s.quest);
+      if (myShiftsFilter === 'empty') filtered = myShifts.filter(s => !s.quest);
+
+      if (filtered.length === 0) {
+        list.innerHTML = '<p style="color:#8a8a96; font-size:14px; text-align:center; padding:20px 0;">Ничего нет</p>';
+        return;
+      }
+
+      const byDate = {};
+      filtered.forEach(s => {
+        if (!byDate[s.slot_date]) byDate[s.slot_date] = [];
+        byDate[s.slot_date].push(s);
+      });
+
+      Object.keys(byDate).sort().forEach(dateKey => {
+        const d = new Date(dateKey + 'T00:00:00');
+        const title = document.createElement('div');
+        title.className = 'day-group-title';
+        title.textContent = `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+        list.appendChild(title);
+
+        byDate[dateKey].forEach(s => {
+          const item = document.createElement('div');
+          item.className = 'my-shift-item';
+          const questLine = s.quest
+            ? `<div class="my-shift-quest">${s.quest}</div>`
+            : `<div class="my-shift-quest empty">игры нет</div>`;
+          const commentLine = s.comment
+            ? `<div class="my-shift-comment">💬 ${s.comment}</div>`
+            : '';
+          item.innerHTML = `
+            <div style="font-size:14px; font-weight:600;">${s.slot_time} · ${s.location}</div>
+            ${questLine}
+            ${commentLine}
+          `;
+          item.onclick = () => jumpToSlot(s.slot_date);
+          list.appendChild(item);
+        });
+      });
+    }
+
+    function jumpToSlot(dateKey) {
+      const d = new Date(dateKey + 'T00:00:00');
+      selectedDate = d;
+      weekStart = getMonday(new Date(d));
+      closeMyShiftsModal();
+      loadSchedule().then(render);
+    }
+
 
     async function bootstrap() {
       await authorize();

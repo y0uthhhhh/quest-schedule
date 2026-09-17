@@ -274,6 +274,66 @@ app.get('/api/schedule', async (req, res) => {
   }
 });
 
+// --- Мои слоты ---
+app.get('/api/my-shifts', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const uid = safeNum(user_id);
+    if (uid === null) {
+      return res.status(400).json({ error: 'Нужен user_id' });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const fromKey = formatDateKey(weekAgo);
+
+    const shiftsRes = await db.execute({
+      sql: `SELECT slot_date, slot_time, location
+            FROM staff_shifts
+            WHERE user_id = ? AND slot_date >= ?
+            ORDER BY slot_date ASC, slot_time ASC`,
+      args: [uid, fromKey],
+    });
+
+    if (shiftsRes.rows.length === 0) {
+      return res.json({ shifts: [] });
+    }
+
+    const bookingsRes = await db.execute({
+      sql: `SELECT id, slot_date, slot_time, location, quest_name, comment
+            FROM client_bookings
+            WHERE slot_date >= ?`,
+      args: [fromKey],
+    });
+
+    const bookingIndex = {};
+    for (const b of bookingsRes.rows) {
+      const key = `${b.slot_date}|${b.location}|${b.slot_time}`;
+      bookingIndex[key] = b;
+    }
+
+    const shifts = shiftsRes.rows.map(s => {
+      const key = `${s.slot_date}|${s.location}|${s.slot_time}`;
+      const booking = bookingIndex[key];
+      return {
+        slot_date: s.slot_date,
+        slot_time: s.slot_time,
+        location: s.location,
+        quest: booking ? booking.quest_name : null,
+        comment: booking ? booking.comment : null,
+        booking_id: booking ? Number(booking.id) : null,
+      };
+    });
+
+    res.json({ shifts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 // --- Добавить клиентскую бронь (только админ) ---
 // --- Добавить клиентскую бронь (только админ) ---
 app.post('/api/client-booking', async (req, res) => {
