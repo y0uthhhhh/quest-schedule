@@ -25,7 +25,6 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Узнать chat_id беседы (для настройки уведомлений)
 bot.onText(/\/getchatid/, (msg) => {
   const threadLine = msg.message_thread_id
     ? `\nThread ID: \`${msg.message_thread_id}\` ← ЭТО НУЖНО В TELEGRAM_THREAD_ID`
@@ -37,7 +36,6 @@ bot.onText(/\/getchatid/, (msg) => {
   );
 });
 
-// Узнать свой Telegram ID
 bot.onText(/\/myid/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
@@ -49,7 +47,6 @@ bot.on('polling_error', (err) => {
   console.error('⚠️ Ошибка бота:', err.message);
 });
 
-// Безопасная отправка сообщения — не ломает основной поток при ошибке
 async function sendTelegramMessage(chatId, text, options = {}) {
   if (!chatId) return false;
   try {
@@ -61,7 +58,6 @@ async function sendTelegramMessage(chatId, text, options = {}) {
   }
 }
 
-// Форматирование даты для сообщений: "20 сентября, 15:30"
 function formatDateHuman(dateStr, timeStr) {
   const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   const d = new Date(dateStr + 'T00:00:00');
@@ -79,12 +75,10 @@ function safeNum(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// Текущее время в часовом поясе приложения (Россия, Москва)
 function now() {
   return new Date();
 }
 
-// Формат даты YYYY-MM-DD
 function formatDateKey(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -92,46 +86,39 @@ function formatDateKey(d) {
   return `${y}-${m}-${day}`;
 }
 
-// Получить начало текущей недели (понедельник)
 function getMonday(d) {
   const date = new Date(d);
   date.setHours(0, 0, 0, 0);
-  const day = date.getDay(); // 0 = Вс
+  const day = date.getDay();
   const diff = (day === 0 ? -6 : 1 - day);
   date.setDate(date.getDate() + diff);
   return date;
 }
 
-// Последняя доступная для брони дата: конец следующей недели (воскресенье)
 function getBookingWindowEnd() {
   const monday = getMonday(now());
-  // Понедельник текущей недели + 13 дней = воскресенье следующей недели
   const end = new Date(monday);
   end.setDate(end.getDate() + 13);
   return end;
 }
 
-// Открыта ли дата для бронирования (не закрыта окном)
 function isSlotOpen(dateStr) {
   const end = getBookingWindowEnd();
   const endKey = formatDateKey(end);
   return dateStr <= endKey;
 }
 
-// Является ли слот архивным (время начала уже прошло)
 function isArchived(dateStr, timeStr) {
   const dt = new Date(`${dateStr}T${timeStr}:00`);
   return dt < now();
 }
 
-// До начала меньше 72 часов?
 function isWithin72Hours(dateStr, timeStr) {
   const dt = new Date(`${dateStr}T${timeStr}:00`);
   const diffMs = dt.getTime() - now().getTime();
   return diffMs < 72 * 60 * 60 * 1000;
 }
 
-// Статус слота для фронта
 function getSlotStatus(dateStr, timeStr) {
   if (isArchived(dateStr, timeStr)) return 'archived';
   if (!isSlotOpen(dateStr)) return 'closed';
@@ -335,7 +322,6 @@ app.get('/api/my-shifts', async (req, res) => {
 });
 
 // --- Добавить клиентскую бронь (только админ) ---
-// --- Добавить клиентскую бронь (только админ) ---
 app.post('/api/client-booking', async (req, res) => {
   try {
     const { slot_date, slot_time, location, quest_name, admin_id } = req.body;
@@ -345,7 +331,6 @@ app.post('/api/client-booking', async (req, res) => {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, quest_name' });
     }
 
-    // Проверяем, что запрос от админа
     const adminIdNum = safeNum(admin_id);
     if (adminIdNum === null) {
       return res.status(403).json({ error: 'Нужен admin_id' });
@@ -358,7 +343,6 @@ app.post('/api/client-booking', async (req, res) => {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
 
-    // Создаём бронь
     const info = await db.execute({
       sql: `INSERT INTO client_bookings
               (slot_date, slot_time, location, quest_name, comment)
@@ -369,7 +353,7 @@ app.post('/api/client-booking', async (req, res) => {
     const bookingId = Number(info.lastInsertRowid);
     res.json({ ok: true, id: bookingId });
 
-    // --- Уведомления (после ответа, чтобы не задерживать UI) ---
+    // --- Уведомления ---
     try {
       const staffRes = await db.execute({
         sql: `SELECT u.telegram_id, u.first_name, u.username
@@ -383,7 +367,6 @@ app.post('/api/client-booking', async (req, res) => {
       const dateHuman = formatDateHuman(slot_date, slot_time);
       const commentLine = comment ? `\n💬 Комментарий: ${comment}` : '';
 
-      // 1. Личка каждому сотруднику
       for (const s of staff) {
         const text =
           `🎮 Новая игра!\n\n` +
@@ -395,7 +378,6 @@ app.post('/api/client-booking', async (req, res) => {
         await sendTelegramMessage(s.telegram_id, text);
       }
 
-      // 2. Общее сообщение в беседу
       const chatId = process.env.TELEGRAM_CHAT_ID;
       const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
       if (chatId) {
@@ -408,15 +390,22 @@ app.post('/api/client-booking', async (req, res) => {
           ).join(', ');
         }
 
+        const botLink = process.env.TELEGRAM_BOT_LINK
+          ? `\n\n👉 <a href="${process.env.TELEGRAM_BOT_LINK}">Открыть расписание</a>`
+          : '';
+
         const groupText =
           `🎮 Новая бронь\n\n` +
           `📍 Локация: ${location}\n` +
           `🎯 Квест: ${quest_name}\n` +
           `📅 ${dateHuman}\n` +
           `👥 Ответственные: ${mentions}` +
-          commentLine;
+          commentLine +
+          botLink;
 
-        const opts = threadId ? { message_thread_id: threadId } : {};
+        const opts = threadId
+          ? { message_thread_id: threadId, parse_mode: 'HTML' }
+          : { parse_mode: 'HTML' };
         await sendTelegramMessage(chatId, groupText, opts);
       }
     } catch (notifyErr) {
@@ -438,7 +427,6 @@ app.delete('/api/client-booking/:id', async (req, res) => {
     const id = safeNum(req.params.id);
     if (id === null) return res.status(400).json({ error: 'Неверный id брони' });
 
-    // Сначала находим бронь, чтобы знать данные для уведомлений
     const bookingRes = await db.execute({
       sql: 'SELECT slot_date, slot_time, location, quest_name FROM client_bookings WHERE id = ?',
       args: [id],
@@ -448,7 +436,6 @@ app.delete('/api/client-booking/:id', async (req, res) => {
     }
     const booking = bookingRes.rows[0];
 
-    // Удаляем
     await db.execute({
       sql: 'DELETE FROM client_bookings WHERE id = ?',
       args: [id],
@@ -456,7 +443,7 @@ app.delete('/api/client-booking/:id', async (req, res) => {
 
     res.json({ ok: true, deleted: 1 });
 
-    // --- Уведомления (после ответа) ---
+    // --- Уведомления ---
     try {
       const staffRes = await db.execute({
         sql: `SELECT u.telegram_id, u.first_name, u.username
@@ -468,7 +455,6 @@ app.delete('/api/client-booking/:id', async (req, res) => {
       const staff = staffRes.rows;
       const dateHuman = formatDateHuman(booking.slot_date, booking.slot_time);
 
-      // 1. Личка каждому
       for (const s of staff) {
         const text =
           `❌ Игра отменена\n\n` +
@@ -478,7 +464,6 @@ app.delete('/api/client-booking/:id', async (req, res) => {
         await sendTelegramMessage(s.telegram_id, text);
       }
 
-      // 2. В беседу
       const chatId = process.env.TELEGRAM_CHAT_ID;
       const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
       if (chatId) {
@@ -491,14 +476,21 @@ app.delete('/api/client-booking/:id', async (req, res) => {
           ).join(', ');
         }
 
+        const botLink = process.env.TELEGRAM_BOT_LINK
+          ? `\n\n👉 <a href="${process.env.TELEGRAM_BOT_LINK}">Открыть расписание</a>`
+          : '';
+
         const groupText =
           `❌ Бронь отменена\n\n` +
           `📍 Локация: ${booking.location}\n` +
           `🎯 Квест: ${booking.quest_name}\n` +
           `📅 ${dateHuman}\n` +
-          `👥 Ответственные: ${mentions}`;
+          `👥 Ответственные: ${mentions}` +
+          botLink;
 
-        const opts = threadId ? { message_thread_id: threadId } : {};
+        const opts = threadId
+          ? { message_thread_id: threadId, parse_mode: 'HTML' }
+          : { parse_mode: 'HTML' };
         await sendTelegramMessage(chatId, groupText, opts);
       }
     } catch (notifyErr) {
@@ -520,7 +512,6 @@ app.post('/api/shift', async (req, res) => {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
     }
 
-    // Проверки статуса слота
     if (isArchived(slot_date, slot_time)) {
       return res.status(400).json({ error: 'Этот слот уже прошёл' });
     }
@@ -528,7 +519,6 @@ app.post('/api/shift', async (req, res) => {
       return res.status(400).json({ error: 'Бронирование на эту дату ещё не открыто' });
     }
 
-    // Проверяем лимит 4 человека
     const countRes = await db.execute({
       sql: `SELECT COUNT(*) as cnt FROM staff_shifts
             WHERE slot_date = ? AND slot_time = ? AND location = ?`,
@@ -538,7 +528,6 @@ app.post('/api/shift', async (req, res) => {
       return res.status(409).json({ error: 'Слот заполнен (максимум 4)' });
     }
 
-    // Проверяем дубликат
     const existRes = await db.execute({
       sql: `SELECT id FROM staff_shifts
             WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
@@ -554,7 +543,6 @@ app.post('/api/shift', async (req, res) => {
       args: [slot_date, slot_time, location, user_id],
     });
 
-    // Возвращаем признак «близко к игре»
     const warning = isWithin72Hours(slot_date, slot_time)
       ? 'До игры меньше 72 часов, снять вас сможет только админ'
       : null;
@@ -575,7 +563,6 @@ app.delete('/api/shift', async (req, res) => {
       return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, user_id' });
     }
 
-    // Проверка 72 часов
     if (isWithin72Hours(slot_date, slot_time)) {
       return res.status(403).json({
         error: 'До игры меньше 72 часов. Снять вас может только админ',

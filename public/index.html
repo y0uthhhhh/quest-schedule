@@ -119,6 +119,20 @@
     .slot.booked { border-color: #d4a857; background: #2e2818; }
     .slot.mine { border-color: #4caf7d; background: #1f3327; }
     .slot.full:not(.mine) { opacity: 0.85; }
+
+        .slot.understaffed {
+      border-color: #e05a5a !important;
+      background: #2e1a1a !important;
+    }
+
+        .slot-warning {
+      color: #e05a5a;
+      font-size: 16px;
+      font-weight: 700;
+      margin-left: 2px;
+      vertical-align: middle;
+    }
+
     .slot.disabled { opacity: 0.5; cursor: default; background: #1f1f26; }
     .slot.disabled:active { background: #1f1f26; }
     .slot-time { font-size: 15px; font-weight: 600; color: #fff; min-width: 48px; }
@@ -869,20 +883,25 @@
           const staffNames = data.staff.map(s => s.name).join(', ');
           const status = getSlotStatus(dateKey, time);
 
-          let cls = 'slot';
+                    let cls = 'slot';
           if (isMine) cls += ' mine';
           else if (isBooked) cls += ' booked';
           if (isFull) cls += ' full';
-          if (status !== 'active') cls += ' disabled';
+          if (staffCount < 2) cls += ' understaffed';
 
           const commentLine = (isBooked && data.comment)
             ? `<div class="slot-comment">${data.comment}</div>`
             : '';
 
+                    // Восклицательный знак: слот забронирован, но сотрудников <2
+          const warningIcon = (isBooked && staffCount < 2)
+            ? '<span class="slot-warning">!</span>'
+            : '';
+
           const slot = document.createElement('div');
           slot.className = cls;
           slot.innerHTML = `
-            <div class="slot-time">${time}</div>
+            <div class="slot-time">${time}${warningIcon}</div>
             <div class="slot-info">
               <div class="slot-quest${isBooked ? '' : ' empty'}">${isBooked ? data.quest : 'игры нет'}</div>
               <div class="slot-staff">${staffCount > 0 ? staffNames : 'сотрудник отсутствует'}</div>
@@ -890,7 +909,7 @@
             </div>
             <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
           `;
-
+          
           // Кнопка «⋮» для админа — если есть сотрудники и слот не архивный
           if (currentUser?.is_admin && staffCount > 0 && status !== 'archived') {
             const manageBtn = document.createElement('button');
