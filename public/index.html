@@ -146,6 +146,14 @@
       font-size: 11px; color: #8a8a96;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+        .slot-comment {
+      font-size: 11px;
+      color: #a88d5a;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .slot-counter { font-size: 11px; color: #8a8a96; min-width: 28px; text-align: right; }
     .slot-counter.free { color: #4caf7d; }
     .slot-counter.full { color: #d4a857; }
@@ -784,7 +792,7 @@
       } else {
         monthText = `${MONTH_NAMES[startMonth]} ${startYear} — ${MONTH_NAMES[endMonth]} ${endYear}`;
       }
-      
+
       document.getElementById('monthLabel').textContent = monthText;
       for (let i = 0; i < 7; i++) {
         const d = new Date(weekStart);
@@ -829,13 +837,17 @@
           else if (isBooked) cls += ' booked';
           if (isFull) cls += ' full';
 
-          const slot = document.createElement('div');
+                    const slot = document.createElement('div');
           slot.className = cls;
+          const commentLine = (isBooked && data.comment)
+            ? `<div class="slot-comment">${data.comment}</div>`
+            : '';
           slot.innerHTML = `
             <div class="slot-time">${time}</div>
             <div class="slot-info">
               <div class="slot-quest${isBooked ? '' : ' empty'}">${isBooked ? data.quest : 'игры нет'}</div>
               <div class="slot-staff">${staffCount > 0 ? staffNames : 'сотрудник отсутствует'}</div>
+              ${commentLine}
             </div>
             <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
           `;
