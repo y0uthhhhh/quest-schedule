@@ -501,14 +501,24 @@ app.delete('/api/shift/admin', async (req, res) => {
 });
 
 // --- Webhook для Telegram ---
-app.post('/api/telegram-webhook', (req, res) => {
+app.post('/api/telegram-webhook', async (req, res) => {
+  console.log('📥 Webhook получен:', JSON.stringify(req.body).slice(0, 200));
   try {
     bot.processUpdate(req.body);
     res.sendStatus(200);
   } catch (err) {
-    console.error('Ошибка webhook:', err);
+    console.error('❌ Ошибка webhook:', err);
     res.sendStatus(500);
   }
+});
+
+// Глобальный перехват ошибок — чтобы не падал процесс
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
 });
 
 // --- Запуск ---
@@ -530,3 +540,12 @@ app.post('/api/telegram-webhook', (req, res) => {
     process.exit(1);
   }
 })();
+
+// Глобальный перехват ошибок — чтобы не падал процесс
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+});
