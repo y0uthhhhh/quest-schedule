@@ -27,10 +27,13 @@ bot.onText(/\/start/, (msg) => {
 
 // Узнать chat_id беседы (для настройки уведомлений)
 bot.onText(/\/getchatid/, (msg) => {
+  const threadLine = msg.message_thread_id
+    ? `\nThread ID: \`${msg.message_thread_id}\` ← ЭТО НУЖНО В TELEGRAM_THREAD_ID`
+    : '\nThread ID: — (это не ветка, а основной чат)';
   bot.sendMessage(
     msg.chat.id,
-    `Chat ID: \`${msg.chat.id}\`\nТип: ${msg.chat.type}\nНазвание: ${msg.chat.title || '—'}`,
-    { parse_mode: 'Markdown' }
+    `Chat ID: \`${msg.chat.id}\`\nТип: ${msg.chat.type}\nНазвание: ${msg.chat.title || '—'}${threadLine}`,
+    { parse_mode: 'Markdown', message_thread_id: msg.message_thread_id }
   );
 });
 
@@ -331,8 +334,9 @@ app.post('/api/client-booking', async (req, res) => {
         await sendTelegramMessage(s.telegram_id, text);
       }
 
-      // 2. Общее сообщение в беседу
+            // 2. Общее сообщение в беседу
       const chatId = process.env.TELEGRAM_CHAT_ID;
+      const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
       if (chatId) {
         let mentions;
         if (staff.length === 0) {
@@ -351,21 +355,9 @@ app.post('/api/client-booking', async (req, res) => {
           `👥 Ответственные: ${mentions}` +
           commentLine;
 
-        await sendTelegramMessage(chatId, groupText);
+        const opts = threadId ? { message_thread_id: threadId } : {};
+        await sendTelegramMessage(chatId, groupText, opts);
       }
-    } catch (notifyErr) {
-      // Не ломаем основной ответ, если уведомления не отправились
-      console.error('⚠️ Ошибка уведомлений:', notifyErr.message);
-    }
-
-  } catch (err) {
-    if (err.message && err.message.includes('UNIQUE')) {
-      return res.status(409).json({ error: 'На этот слот уже есть бронь' });
-    }
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка базы данных' });
-  }
-});
 
 // --- Удалить клиентскую бронь (только админ) ---
 app.delete('/api/client-booking/:id', async (req, res) => {
@@ -373,11 +365,73 @@ app.delete('/api/client-booking/:id', async (req, res) => {
     const id = safeNum(req.params.id);
     if (id === null) return res.status(400).json({ error: 'Неверный id брони' });
 
-    const info = await db.execute({
+    // Сначала находим бронь, чтобы знать данные для уведомлений
+    const bookingRes = await db.execute({
+      sql: 'SELECT slot_date, slot_time, location, quest_name FROM client_bookings WHERE id = ?',
+      args: [id],
+    });
+    if (bookingRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Бронь не найдена' });
+    }
+    const booking = bookingRes.rows[0];
+
+    // Удаляем
+    await db.execute({
       sql: 'DELETE FROM client_bookings WHERE id = ?',
       args: [id],
     });
-    res.json({ ok: true, deleted: info.rowsAffected });
+
+    res.json({ ok: true, deleted: 1 });
+
+    // --- Уведомления (после ответа) ---
+    try {
+      const staffRes = await db.execute({
+        sql: `SELECT u.telegram_id, u.first_name, u.username
+              FROM staff_shifts ss
+              JOIN users u ON u.id = ss.user_id
+              WHERE ss.slot_date = ? AND ss.slot_time = ? AND ss.location = ?`,
+        args: [booking.slot_date, booking.slot_time, booking.location],
+      });
+      const staff = staffRes.rows;
+      const dateHuman = formatDateHuman(booking.slot_date, booking.slot_time);
+
+      // 1. Личка каждому
+      for (const s of staff) {
+        const text =
+          `❌ Игра отменена\n\n` +
+          `📍 Локация: ${booking.location}\n` +
+          `🎯 Квест: ${booking.quest_name}\n` +
+          `📅 ${dateHuman}`;
+        await sendTelegramMessage(s.telegram_id, text);
+      }
+
+      // 2. В беседу
+      const chatId = process.env.TELEGRAM_CHAT_ID;
+      const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
+      if (chatId) {
+        let mentions;
+        if (staff.length === 0) {
+          mentions = '—';
+        } else {
+          mentions = staff.map(s =>
+            s.username ? `@${s.username}` : s.first_name
+          ).join(', ');
+        }
+
+        const groupText =
+          `❌ Бронь отменена\n\n` +
+          `📍 Локация: ${booking.location}\n` +
+          `🎯 Квест: ${booking.quest_name}\n` +
+          `📅 ${dateHuman}\n` +
+          `👥 Ответственные: ${mentions}`;
+
+        const opts = threadId ? { message_thread_id: threadId } : {};
+        await sendTelegramMessage(chatId, groupText, opts);
+      }
+    } catch (notifyErr) {
+      console.error('⚠️ Ошибка уведомлений при удалении:', notifyErr.message);
+    }
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка базы данных' });
