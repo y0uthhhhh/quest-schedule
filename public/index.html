@@ -531,36 +531,40 @@
     }
 
     function openSlotModal(location, time, staff) {
-      const dateKey = formatKey(selectedDate);
-      document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
-      const list = document.getElementById('slotStaffList');
-      list.innerHTML = '';
+  const dateKey = formatKey(selectedDate);
+  document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
 
-      staff.forEach(s => {
-        const item = document.createElement('div');
-        item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
-        const isSelf = s.id === currentUser.id;
-        item.innerHTML = `
-          <div style="flex:1; min-width:0;">
-            <div style="font-size:14px; font-weight:600;">${s.name}${isSelf ? ' (вы)' : ''}</div>
-          </div>
-          ${isSelf ? '' : '<button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Снять</button>'}
-        `;
-        if (!isSelf) {
-          item.querySelector('button').onclick = () => removeStaffFromSlot(location, time, s.id);
-        }
-        list.appendChild(item);
-      });
+  const list = document.getElementById('slotStaffList');
+  list.innerHTML = '';
 
-      document.getElementById('slotModal').classList.add('show');
-    }
+  staff.forEach(s => {
+    const item = document.createElement('div');
+    item.style.cssText = 'background:#23232b; border-radius:10px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;';
+    const isSelf = s.id === currentUser.id;
+    item.innerHTML = `
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:14px; font-weight:600;">${s.name}${isSelf ? ' (вы)' : ''}</div>
+      </div>
+      <button class="btn-danger" style="padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer; border:none; font-weight:500;">Снять</button>
+    `;
+    item.querySelector('button').onclick = () => removeStaffFromSlot(location, time, s.id);
+    list.appendChild(item);
+  });
+
+  document.getElementById('slotModal').classList.add('show');
+}
 
     function closeSlotModal() {
       document.getElementById('slotModal').classList.remove('show');
     }
 
     async function removeStaffFromSlot(location, time, targetUserId) {
-      if (!await askConfirm('Снять сотрудника со слота?')) return;
+  const isSelf = targetUserId === currentUser.id;
+  const msg = isSelf
+    ? 'Снять себя со слота?'
+    : 'Снять сотрудника со слота?';
+  if (!await askConfirm(msg)) return;
+
       const slot_date = formatKey(selectedDate);
       try {
         const res = await fetch('/api/shift/admin', {
@@ -571,6 +575,7 @@
             admin_id: currentUser.id,
             target_user_id: targetUserId,
           }),
+
         });
         const json = await res.json();
         if (!json.ok) { showToast(json.error || 'Ошибка', true); return; }
