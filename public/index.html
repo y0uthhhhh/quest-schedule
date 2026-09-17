@@ -171,6 +171,32 @@
     }
     .slot-manage:active { background: #4a4a55; }
 
+        .slot-add-btn {
+      width: 100%;
+      background: #23232b;
+      color: #d4a857;
+      border: 1px dashed #d4a857;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+    .slot-add-btn:active {
+      background: #2e2818;
+    }
+    .slot-add-plus {
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1;
+    }
+
     .loading { text-align: center; padding: 40px 20px; color: #8a8a96; font-size: 14px; }
     .toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -628,15 +654,13 @@
       }
 
       // Кнопка «+ Добавить сотрудника» — если есть место
-      if (staff.length < 4) {
+            if (staff.length < 4) {
         const addBtn = document.createElement('button');
-        addBtn.className = 'btn-save';
-        addBtn.style.cssText = 'width:100%; padding:10px; margin-top:10px;';
-        addBtn.textContent = '+ Добавить сотрудника';
+        addBtn.className = 'slot-add-btn';
+        addBtn.innerHTML = '<span class="slot-add-plus">+</span> Добавить сотрудника';
         addBtn.onclick = () => openAddStaffModal(location, time, staff);
         list.appendChild(addBtn);
       }
-
       document.getElementById('slotModal').classList.add('show');
     }
 
@@ -941,13 +965,14 @@
           `;
 
           // Кнопка «⋮» для админа — если есть сотрудники и слот не архивный
-          if (currentUser?.is_admin && staffCount > 0 && status !== 'archived') {
+                    if (currentUser?.is_admin) {
             const manageBtn = document.createElement('button');
             manageBtn.className = 'slot-manage';
             manageBtn.textContent = '⋮';
+            manageBtn.title = 'Управление сотрудниками';
             manageBtn.onclick = (e) => {
               e.stopPropagation();
-              openSlotModal(loc, time, data.staff);
+              openSlotModal(loc, time, data.staff || []);
             };
             slot.appendChild(manageBtn);
           }
