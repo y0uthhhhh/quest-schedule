@@ -512,15 +512,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
   }
 });
 
-// Глобальный перехват ошибок — чтобы не падал процесс
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-});
-
 // --- Запуск ---
 (async () => {
   try {
@@ -528,24 +519,11 @@ process.on('uncaughtException', (err) => {
     app.listen(PORT, () => {
       console.log(`✅ Сервер запущен: http://localhost:${PORT}`);
       console.log(`📅 Окно бронирования до: ${formatDateKey(getBookingWindowEnd())}`);
-      if (process.env.NODE_ENV === 'production') {
-        console.log(`🤖 Бот в режиме webhook.`);
-      } else {
-        console.log(`🤖 Бот в режиме polling.`);
-        bot.startPolling();
-      }
+      bot.startPolling();
+      console.log(`🤖 Бот в режиме polling.`);
     });
   } catch (err) {
     console.error('❌ Не удалось запустить сервер:', err);
     process.exit(1);
   }
 })();
-
-// Глобальный перехват ошибок — чтобы не падал процесс
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-});
