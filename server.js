@@ -22,6 +22,23 @@ bot.onText(/\/start/, (msg) => {
     `Привет, ${name}! 👋\n\nЭто бот для бронирования смен.`);
 });
 
+// Узнать chat_id беседы (для настройки уведомлений)
+bot.onText(/\/getchatid/, (msg) => {
+  bot.sendMessage(
+    msg.chat.id,
+    `Chat ID: \`${msg.chat.id}\`\nТип: ${msg.chat.type}\nНазвание: ${msg.chat.title || '—'}`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// Узнать свой Telegram ID
+bot.onText(/\/myid/, (msg) => {
+  bot.sendMessage(
+    msg.chat.id,
+    `Ваш Telegram ID: \`${msg.from.id}\`\nИмя: ${msg.from.first_name || '—'}\nUsername: @${msg.from.username || '—'}`
+  );
+});
+
 bot.on('polling_error', (err) => {
   console.error('⚠️ Ошибка бота:', err.message);
 });
