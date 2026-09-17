@@ -215,6 +215,39 @@ app.delete('/api/client-booking/:id', async (req, res) => {
   }
 });
 
+// --- Админ: снять любого сотрудника со слота ---
+app.delete('/api/shift/admin', async (req, res) => {
+  try {
+    const { slot_date, slot_time, location } = req.body;
+    const admin_id = safeNum(req.body.admin_id);
+    const target_user_id = safeNum(req.body.target_user_id);
+
+    if (!slot_date || !slot_time || !location || admin_id === null || target_user_id === null) {
+      return res.status(400).json({ error: 'Нужны поля: slot_date, slot_time, location, admin_id, target_user_id' });
+    }
+
+    // Проверяем, что admin_id — действительно админ
+    const adminRes = await db.execute({
+      sql: 'SELECT is_admin FROM users WHERE id = ?',
+      args: [admin_id],
+    });
+    if (adminRes.rows.length === 0 || !adminRes.rows[0].is_admin) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const info = await db.execute({
+      sql: `DELETE FROM staff_shifts
+            WHERE slot_date = ? AND slot_time = ? AND location = ? AND user_id = ?`,
+      args: [slot_date, slot_time, location, target_user_id],
+    });
+
+    res.json({ ok: true, deleted: info.rowsAffected });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка базы данных' });
+  }
+});
+
 // --- Запись сотрудника на слот ---
 app.post('/api/shift', async (req, res) => {
   try {
