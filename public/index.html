@@ -15,6 +15,60 @@
       padding-bottom: 40px;
       min-height: 100vh;
     }
+
+    /* --- Экран пинкода --- */
+    .pin-screen {
+      position: fixed; inset: 0; z-index: 999;
+      background: #1a1a1f;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 20px;
+      transition: opacity 0.3s;
+    }
+    .pin-screen.hidden { opacity: 0; pointer-events: none; }
+    .pin-title {
+      font-size: 20px; font-weight: 600;
+      margin-bottom: 8px; text-align: center;
+    }
+    .pin-subtitle {
+      font-size: 13px; color: #8a8a96;
+      margin-bottom: 28px; text-align: center;
+    }
+    .pin-dots {
+      display: flex; gap: 14px; margin-bottom: 32px;
+    }
+    .pin-dot {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #2a2a32;
+      border: 1px solid #3a3a44;
+      transition: background 0.15s;
+    }
+    .pin-dot.filled { background: #d4a857; border-color: #d4a857; }
+    .pin-dots.error { animation: shake 0.4s; }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
+    }
+    .pin-pad {
+      display: grid; grid-template-columns: repeat(3, 72px);
+      gap: 12px;
+    }
+    .pin-btn {
+      width: 72px; height: 72px;
+      background: #23232b; color: #e8e8ea;
+      border: none; border-radius: 50%;
+      font-size: 26px; font-weight: 500;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .pin-btn:active { background: #3a3a44; }
+    .pin-btn.empty { visibility: hidden; }
+    .pin-btn.back { font-size: 20px; color: #8a8a96; }
+
+    /* --- Основное приложение --- */
     header { padding: 8px 0 16px; border-bottom: 1px solid #2a2a32; margin-bottom: 16px; }
     .header-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     h1 { font-size: 20px; font-weight: 600; }
@@ -37,6 +91,14 @@
     }
     .btn-remove:active { background: #4a2020; }
 
+    .month-label {
+      text-align: center;
+      font-size: 13px;
+      color: #d4a857;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      text-transform: capitalize;
+    }
     .week-nav { display: flex; align-items: center; gap: 8px; margin-top: 12px; margin-bottom: 8px; }
     .week-nav button {
       background: #2a2a32; color: #e8e8ea; border: none;
@@ -89,7 +151,6 @@
     .slot-counter.full { color: #d4a857; }
     .slot-counter.mine { color: #4caf7d; font-weight: 600; }
 
-    /* Кнопка управления слотом (для админа) */
     .slot-manage {
       background: #3a3a44; color: #d4a857; border: none;
       width: 26px; height: 26px; border-radius: 6px;
@@ -160,6 +221,32 @@
   </style>
 </head>
 <body>
+  <!-- Экран пинкода -->
+  <div class="pin-screen hidden" id="pinScreen">
+    <div class="pin-title">Введите пинкод</div>
+    <div class="pin-subtitle">Доступ только для сотрудников</div>
+    <div class="pin-dots" id="pinDots">
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+    </div>
+    <div class="pin-pad" id="pinPad">
+      <button class="pin-btn" data-num="1">1</button>
+      <button class="pin-btn" data-num="2">2</button>
+      <button class="pin-btn" data-num="3">3</button>
+      <button class="pin-btn" data-num="4">4</button>
+      <button class="pin-btn" data-num="5">5</button>
+      <button class="pin-btn" data-num="6">6</button>
+      <button class="pin-btn" data-num="7">7</button>
+      <button class="pin-btn" data-num="8">8</button>
+      <button class="pin-btn" data-num="9">9</button>
+      <button class="pin-btn empty"></button>
+      <button class="pin-btn" data-num="0">0</button>
+      <button class="pin-btn back" data-action="back">⌫</button>
+    </div>
+  </div>
+
   <header>
     <div class="header-top">
       <h1>Расписание смен</h1>
@@ -169,6 +256,7 @@
         <button class="btn-remove" id="btnRemoveBooking" style="display:none" onclick="openRemoveModal()">− Бронь</button>
       </div>
     </div>
+    <div class="month-label" id="monthLabel">—</div>
     <div class="week-nav">
       <button onclick="changeWeek(-1)">←</button>
       <div class="week-range" id="weekRange">—</div>
@@ -239,6 +327,72 @@
   </div>
 
   <script>
+    // ============ НАСТРОЙКИ ============
+    const APP_PIN = '2708'; // ← пинкод доступа
+    const PIN_STORAGE_KEY = 'quest_pin_ok';
+
+    // ============ ПРОВЕРКА ПИНКОДА ============
+    let enteredPin = '';
+
+    function checkPin() {
+      if (localStorage.getItem(PIN_STORAGE_KEY) === '1') {
+        document.getElementById('pinScreen').classList.add('hidden');
+        return true;
+      }
+      document.getElementById('pinScreen').classList.remove('hidden');
+      return false;
+    }
+
+    function initPinPad() {
+      const pad = document.getElementById('pinPad');
+      const dots = document.querySelectorAll('#pinDots .pin-dot');
+      const dotsWrap = document.getElementById('pinDots');
+
+      function updateDots() {
+        dots.forEach((d, i) => {
+          d.classList.toggle('filled', i < enteredPin.length);
+        });
+      }
+
+      pad.addEventListener('click', (e) => {
+        const btn = e.target.closest('.pin-btn');
+        if (!btn) return;
+
+        const num = btn.dataset.num;
+        const action = btn.dataset.action;
+
+        if (action === 'back') {
+          enteredPin = enteredPin.slice(0, -1);
+          updateDots();
+          return;
+        }
+
+        if (num && enteredPin.length < 4) {
+          enteredPin += num;
+          updateDots();
+
+          if (enteredPin.length === 4) {
+            setTimeout(() => {
+              if (enteredPin === APP_PIN) {
+                localStorage.setItem(PIN_STORAGE_KEY, '1');
+                document.getElementById('pinScreen').classList.add('hidden');
+                // Запускаем загрузку данных
+                if (typeof bootstrap === 'function') bootstrap();
+              } else {
+                dotsWrap.classList.add('error');
+                setTimeout(() => {
+                  dotsWrap.classList.remove('error');
+                  enteredPin = '';
+                  updateDots();
+                }, 400);
+              }
+            }, 150);
+          }
+        }
+      });
+    }
+
+    // ============ ПРИЛОЖЕНИЕ ============
     const tg = window.Telegram?.WebApp;
     if (tg) { tg.ready(); tg.expand(); }
 
@@ -249,7 +403,7 @@
     };
     const SLOT_TIMES = ['10:00','11:30','13:00','14:30','16:00','17:30','19:00','20:30','22:00'];
     const DAY_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
-    const MONTH_NAMES = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+    const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
     let today = new Date(); today.setHours(0,0,0,0);
     let weekStart = getMonday(new Date(today));
@@ -298,7 +452,6 @@
       });
     }
 
-    // --- Авторизация ---
     async function authorize() {
       if (!IS_TELEGRAM) {
         currentUser = { id: DEBUG_USER_ID, first_name: 'Тестовый Гость', is_admin: 1 };
@@ -339,7 +492,6 @@
       }
     }
 
-    // --- Расписание ---
     async function loadSchedule() {
       const from = formatKey(weekStart);
       try {
@@ -363,7 +515,6 @@
 
     function selectDay(d) { selectedDate = new Date(d); render(); }
 
-    // --- Запись/отписка ---
     async function clickSlot(location, time, isMine, isFull) {
       if (!currentUser || !currentUser.id) { showToast('Авторизуйтесь в Telegram', true); return; }
       if (!isMine && isFull) { showToast('Слот заполнен (4/4)', true); return; }
@@ -393,7 +544,6 @@
       }
     }
 
-    // --- Окно управления слотом (админ) ---
     function openSlotModal(location, time, staff) {
       const dateKey = formatKey(selectedDate);
       document.getElementById('slotInfo').textContent = `${dateKey} · ${location} · ${time}`;
@@ -450,7 +600,6 @@
       }
     }
 
-    // --- Модальное окно добавления брони ---
     function openBookingModal() {
       if (!currentUser?.is_admin) return;
 
@@ -515,7 +664,6 @@
       }
     }
 
-    // --- Модальное окно удаления броней (на всю неделю) ---
     async function openRemoveModal() {
       if (!currentUser?.is_admin) return;
 
@@ -523,7 +671,7 @@
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       document.getElementById('removeWeek').textContent =
-        `${weekStart.getDate()} ${MONTH_NAMES[weekStart.getMonth()]} — ${weekEnd.getDate()} ${MONTH_NAMES[weekEnd.getMonth()]}`;
+        `${weekStart.getDate()} — ${weekEnd.getDate()}`;
 
       const list = document.getElementById('removeList');
       list.innerHTML = '<p style="color:#8a8a96; font-size:14px; text-align:center; padding:20px 0;">Загрузка…</p>';
@@ -613,15 +761,31 @@
       }
     }
 
-    // --- Рендер ---
     function renderWeek() {
       const daysEl = document.getElementById('weekDays');
       daysEl.innerHTML = '';
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
-      document.getElementById('weekRange').textContent =
-        `${weekStart.getDate()} ${MONTH_NAMES[weekStart.getMonth()]} — ${weekEnd.getDate()} ${MONTH_NAMES[weekEnd.getMonth()]}`;
 
+            // Название месяца: одна или две подписи, если неделя пересекает границу месяца
+      const weekEndForLabel = new Date(weekStart);
+      weekEndForLabel.setDate(weekEndForLabel.getDate() + 6);
+
+      const startMonth = weekStart.getMonth();
+      const endMonth = weekEndForLabel.getMonth();
+      const startYear = weekStart.getFullYear();
+      const endYear = weekEndForLabel.getFullYear();
+
+      let monthText;
+      if (startMonth === endMonth && startYear === endYear) {
+        monthText = `${MONTH_NAMES[startMonth]} ${startYear}`;
+      } else if (startYear === endYear) {
+        monthText = `${MONTH_NAMES[startMonth]} — ${MONTH_NAMES[endMonth]} ${startYear}`;
+      } else {
+        monthText = `${MONTH_NAMES[startMonth]} ${startYear} — ${MONTH_NAMES[endMonth]} ${endYear}`;
+      }
+      
+      document.getElementById('monthLabel').textContent = monthText;
       for (let i = 0; i < 7; i++) {
         const d = new Date(weekStart);
         d.setDate(d.getDate() + i);
@@ -676,12 +840,10 @@
             <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
           `;
 
-          // Кнопка управления слотом — только для админа и только если есть сотрудники
           if (currentUser?.is_admin && staffCount > 0) {
             const manageBtn = document.createElement('button');
             manageBtn.className = 'slot-manage';
             manageBtn.textContent = '⋮';
-            manageBtn.title = 'Управление сотрудниками';
             manageBtn.onclick = (e) => {
               e.stopPropagation();
               openSlotModal(loc, time, data.staff);
@@ -689,7 +851,6 @@
             slot.appendChild(manageBtn);
           }
 
-          // Клик по остальной части слота — запись/отписка
           slot.onclick = (e) => {
             if (e.target.classList.contains('slot-manage')) return;
             clickSlot(loc, time, isMine, isFull);
@@ -705,11 +866,21 @@
 
     function render() { renderWeek(); renderSchedule(); }
 
-    (async () => {
+    // ============ ЗАПУСК ============
+    async function bootstrap() {
       await authorize();
       await loadSchedule();
       render();
-    })();
+    }
+
+    // Инициализация пинкода
+    initPinPad();
+
+    if (checkPin()) {
+      // Пинкод уже был введён — стартуем сразу
+      bootstrap();
+    }
+    // Если пинкод не введён — ждём, пока пользователь его введёт (тогда вызовется bootstrap)
   </script>
 </body>
 </html>
