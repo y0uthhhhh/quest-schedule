@@ -120,9 +120,20 @@
     .slot.mine { border-color: #4caf7d; background: #1f3327; }
     .slot.full:not(.mine) { opacity: 0.85; }
 
-        .slot.understaffed {
+    /* 0 сотрудников — красный */
+    .slot.empty-staff {
       border-color: #e05a5a !important;
       background: #2e1a1a !important;
+    }
+    /* 1 сотрудник — оранжевый */
+    .slot.one-staff {
+      border-color: #e8903e !important;
+      background: #2e2418 !important;
+    }
+    /* 2+ сотрудников — зелёный */
+    .slot.ok-staff {
+      border-color: #4caf7d !important;
+      background: #1f3327 !important;
     }
 
         .slot-warning {
@@ -883,12 +894,17 @@
           const staffNames = data.staff.map(s => s.name).join(', ');
           const status = getSlotStatus(dateKey, time);
 
-                    let cls = 'slot';
+                             let cls = 'slot';
           if (isMine) cls += ' mine';
           else if (isBooked) cls += ' booked';
           if (isFull) cls += ' full';
-          if (staffCount < 2) cls += ' understaffed';
 
+          // Подсветка по количеству сотрудников:
+          // 0 — красный, 1 — оранжевый, 2+ — зелёный
+          if (staffCount === 0) cls += ' empty-staff';
+          else if (staffCount === 1) cls += ' one-staff';
+          else cls += ' ok-staff';
+          
           const commentLine = (isBooked && data.comment)
             ? `<div class="slot-comment">${data.comment}</div>`
             : '';
@@ -909,7 +925,7 @@
             </div>
             <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
           `;
-          
+
           // Кнопка «⋮» для админа — если есть сотрудники и слот не архивный
           if (currentUser?.is_admin && staffCount > 0 && status !== 'archived') {
             const manageBtn = document.createElement('button');
