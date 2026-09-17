@@ -275,6 +275,7 @@ app.get('/api/schedule', async (req, res) => {
 });
 
 // --- Добавить клиентскую бронь (только админ) ---
+// --- Добавить клиентскую бронь (только админ) ---
 app.post('/api/client-booking', async (req, res) => {
   try {
     const { slot_date, slot_time, location, quest_name, admin_id } = req.body;
@@ -334,7 +335,7 @@ app.post('/api/client-booking', async (req, res) => {
         await sendTelegramMessage(s.telegram_id, text);
       }
 
-            // 2. Общее сообщение в беседу
+      // 2. Общее сообщение в беседу
       const chatId = process.env.TELEGRAM_CHAT_ID;
       const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
       if (chatId) {
@@ -358,6 +359,18 @@ app.post('/api/client-booking', async (req, res) => {
         const opts = threadId ? { message_thread_id: threadId } : {};
         await sendTelegramMessage(chatId, groupText, opts);
       }
+    } catch (notifyErr) {
+      console.error('⚠️ Ошибка уведомлений:', notifyErr.message);
+    }
+
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'На этот слот уже есть бронь' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка базы данных' });
+  }
+});
 
 // --- Удалить клиентскую бронь (только админ) ---
 app.delete('/api/client-booking/:id', async (req, res) => {
