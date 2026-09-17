@@ -19,7 +19,10 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 bot.onText(/\/start/, (msg) => {
   const name = msg.from.first_name || 'сотрудник';
   bot.sendMessage(msg.chat.id,
-    `Привет, ${name}! 👋\n\nЭто бот для бронирования смен.`);
+    `Привет, ${name}! 👋\n\n` +
+    `Это бот для бронирования смен в квестах.\n\n` +
+    `Чтобы открыть расписание — нажми кнопку «Расписание» рядом с полем ввода (или значок меню слева).`,
+  );
 });
 
 // Узнать chat_id беседы (для настройки уведомлений)
@@ -42,6 +45,25 @@ bot.onText(/\/myid/, (msg) => {
 bot.on('polling_error', (err) => {
   console.error('⚠️ Ошибка бота:', err.message);
 });
+
+// Безопасная отправка сообщения — не ломает основной поток при ошибке
+async function sendTelegramMessage(chatId, text, options = {}) {
+  if (!chatId) return false;
+  try {
+    await bot.sendMessage(chatId, text, options);
+    return true;
+  } catch (err) {
+    console.error(`⚠️ Не удалось отправить в ${chatId}:`, err.message);
+    return false;
+  }
+}
+
+// Форматирование даты для сообщений: "20 сентября, 15:30"
+function formatDateHuman(dateStr, timeStr) {
+  const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getDate()} ${months[d.getMonth()]}, ${timeStr}`;
+}
 
 // --- Express ---
 app.use(express.json());
@@ -272,6 +294,7 @@ app.post('/api/client-booking', async (req, res) => {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
 
+    // Создаём бронь
     const info = await db.execute({
       sql: `INSERT INTO client_bookings
               (slot_date, slot_time, location, quest_name, comment)
@@ -279,7 +302,62 @@ app.post('/api/client-booking', async (req, res) => {
       args: [slot_date, slot_time, location, quest_name, comment],
     });
 
-    res.json({ ok: true, id: Number(info.lastInsertRowid) });
+    const bookingId = Number(info.lastInsertRowid);
+    res.json({ ok: true, id: bookingId });
+
+    // --- Уведомления (после ответа, чтобы не задерживать UI) ---
+    try {
+      const staffRes = await db.execute({
+        sql: `SELECT u.telegram_id, u.first_name, u.username
+              FROM staff_shifts ss
+              JOIN users u ON u.id = ss.user_id
+              WHERE ss.slot_date = ? AND ss.slot_time = ? AND ss.location = ?`,
+        args: [slot_date, slot_time, location],
+      });
+
+      const staff = staffRes.rows;
+      const dateHuman = formatDateHuman(slot_date, slot_time);
+      const commentLine = comment ? `\n💬 Комментарий: ${comment}` : '';
+
+      // 1. Личка каждому сотруднику
+      for (const s of staff) {
+        const text =
+          `🎮 Новая игра!\n\n` +
+          `📍 Локация: ${location}\n` +
+          `🎯 Квест: ${quest_name}\n` +
+          `📅 ${dateHuman}` +
+          commentLine +
+          `\n\nТы ответственный за этот слот.`;
+        await sendTelegramMessage(s.telegram_id, text);
+      }
+
+      // 2. Общее сообщение в беседу
+      const chatId = process.env.TELEGRAM_CHAT_ID;
+      if (chatId) {
+        let mentions;
+        if (staff.length === 0) {
+          mentions = '— (никто не записан)';
+        } else {
+          mentions = staff.map(s =>
+            s.username ? `@${s.username}` : s.first_name
+          ).join(', ');
+        }
+
+        const groupText =
+          `🎮 Новая бронь\n\n` +
+          `📍 Локация: ${location}\n` +
+          `🎯 Квест: ${quest_name}\n` +
+          `📅 ${dateHuman}\n` +
+          `👥 Ответственные: ${mentions}` +
+          commentLine;
+
+        await sendTelegramMessage(chatId, groupText);
+      }
+    } catch (notifyErr) {
+      // Не ломаем основной ответ, если уведомления не отправились
+      console.error('⚠️ Ошибка уведомлений:', notifyErr.message);
+    }
+
   } catch (err) {
     if (err.message && err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'На этот слот уже есть бронь' });
