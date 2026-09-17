@@ -209,6 +209,32 @@
       line-height: 1;
     }
 
+        /* Табы локаций */
+    .location-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 16px;
+      margin-bottom: 4px;
+    }
+    .location-tab {
+      background: #23232b;
+      color: #8a8a96;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .location-tab:active { background: #2a2a34; }
+    .location-tab.active {
+      background: #3a3a44;
+      color: #d4a857;
+      border-color: #d4a857;
+    }
+
     .loading { text-align: center; padding: 40px 20px; color: #8a8a96; font-size: 14px; }
     .toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -300,6 +326,11 @@
     </div>
     <div class="week-days" id="weekDays"></div>
   </header>
+
+    <div class="location-tabs" id="locationTabs">
+    <button class="location-tab active" data-loc="Свобода" onclick="setLocationTab('Свобода')">Свобода</button>
+    <button class="location-tab" data-loc="Плехановская" onclick="setLocationTab('Плехановская')">Плехановская</button>
+  </div>
 
   <div id="schedule"><div class="loading">Загрузка…</div></div>
   <div class="toast" id="toast"></div>
@@ -452,6 +483,7 @@
     let selectedDate = new Date(today);
     let scheduleData = {};
     let currentUser = null;
+    let activeLocation = 'Свобода';
     let bookingWindowEnd = null; // YYYY-MM-DD
 
     const IS_TELEGRAM = !!(tg && tg.initData);
@@ -912,103 +944,104 @@
       const dayData = scheduleData[dateKey] || {};
       const dayStatus = getDayStatus(dateKey);
 
-      // Информационный баннер
+      // Информационный баннер (если неделя закрыта)
       if (dayStatus === 'closed' && bookingWindowEnd) {
-        const endD = new Date(bookingWindowEnd + 'T00:00:00');
         const banner = document.createElement('div');
         banner.className = 'info-banner warn';
-        // Дата следующего понедельника (когда откроется)
         const nextMon = getMonday(new Date());
         nextMon.setDate(nextMon.getDate() + 7);
         banner.textContent = `Слоты на эту неделю пока закрыты. Откроются в понедельник, ${nextMon.getDate()} ${MONTH_NAMES[nextMon.getMonth()].slice(0,3).toLowerCase()}.`;
         container.appendChild(banner);
       }
 
+      // Обёртка — одна локация (активная)
       const locWrap = document.createElement('div');
       locWrap.className = 'locations';
 
-      LOCATIONS.forEach(loc => {
-        const locEl = document.createElement('div');
-        locEl.className = 'location';
-        locEl.innerHTML = `<h2>${loc}</h2>`;
-        const slotsEl = document.createElement('div');
-        slotsEl.className = 'slots';
+      const locEl = document.createElement('div');
+      locEl.className = 'location';
+      const slotsEl = document.createElement('div');
+      slotsEl.className = 'slots';
 
-        SLOT_TIMES.forEach(time => {
-          const key = `${loc}|${time}`;
-          const data = dayData[key] || { quest: null, staff: [] };
-          const isBooked = !!data.quest;
-          const staffCount = data.staff.length;
-          const isMine = currentUser && data.staff.some(s => s.id === currentUser.id);
-          const isFull = staffCount >= 4;
-          const staffNames = data.staff.map(s => s.name).join(', ');
-          const status = getSlotStatus(dateKey, time);
+      SLOT_TIMES.forEach(time => {
+        const key = `${activeLocation}|${time}`;
+        const data = dayData[key] || { quest: null, staff: [] };
+        const isBooked = !!data.quest;
+        const staffCount = data.staff.length;
+        const isMine = currentUser && data.staff.some(s => s.id === currentUser.id);
+        const isFull = staffCount >= 4;
+        const staffNames = data.staff.map(s => s.name).join(', ');
+        const status = getSlotStatus(dateKey, time);
+        const isDisabled = status !== 'active';
 
-                    const isDisabled = status !== 'active';
+        let cls = 'slot';
+        if (isDisabled) {
+          cls += ' disabled';
+        } else {
+          cls += ' active-slot';
+          if (isMine) cls += ' mine';
+          else if (isBooked) cls += ' booked';
+          if (isFull) cls += ' full';
+          if (staffCount === 0) cls += ' empty-staff';
+          else if (staffCount === 1) cls += ' one-staff';
+          else cls += ' ok-staff';
+        }
 
-          let cls = 'slot';
-          if (isDisabled) {
-            // Архив или закрытая неделя — серый, без цветовой подсветки
-            cls += ' disabled';
-          } else {
-            // Активный слот — цвет по количеству сотрудников
-            cls += ' active-slot';
-            if (isMine) cls += ' mine';
-            else if (isBooked) cls += ' booked';
-            if (isFull) cls += ' full';
-            if (staffCount === 0) cls += ' empty-staff';
-            else if (staffCount === 1) cls += ' one-staff';
-            else cls += ' ok-staff';
-          }
-          
-          const commentLine = (isBooked && data.comment)
-            ? `<div class="slot-comment">${data.comment}</div>`
-            : '';
+        const commentLine = (isBooked && data.comment)
+          ? `<div class="slot-comment">${data.comment}</div>`
+          : '';
 
-                    // Восклицательный знак: слот забронирован, но сотрудников <2
-          const warningIcon = (isBooked && staffCount < 2)
-            ? '<span class="slot-warning">!</span>'
-            : '';
+        // Восклицательный знак: забронирован, но <2 сотрудников
+        const warningIcon = (isBooked && staffCount < 2 && !isDisabled)
+          ? '<span class="slot-warning">!</span>'
+          : '';
 
-          const slot = document.createElement('div');
-          slot.className = cls;
-          slot.innerHTML = `
-            <div class="slot-time">${time}${warningIcon}</div>
-            <div class="slot-info">
-              <div class="slot-quest${isBooked ? '' : ' empty'}">${isBooked ? data.quest : 'игры нет'}</div>
-              <div class="slot-staff">${staffCount > 0 ? staffNames : 'сотрудник отсутствует'}</div>
-              ${commentLine}
-            </div>
-            <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
-          `;
+        const slot = document.createElement('div');
+        slot.className = cls;
+        slot.innerHTML = `
+          <div class="slot-time">${time}${warningIcon}</div>
+          <div class="slot-info">
+            <div class="slot-quest${isBooked ? '' : ' empty'}">${isBooked ? data.quest : 'игры нет'}</div>
+            <div class="slot-staff">${staffCount > 0 ? staffNames : 'сотрудник отсутствует'}</div>
+            ${commentLine}
+          </div>
+          <div class="slot-counter ${isMine ? 'mine' : (isFull ? 'full' : 'free')}">${staffCount}/4</div>
+        `;
 
-          // Кнопка «⋮» для админа — если есть сотрудники и слот не архивный
-                    if (currentUser?.is_admin) {
-            const manageBtn = document.createElement('button');
-            manageBtn.className = 'slot-manage';
-            manageBtn.textContent = '⋮';
-            manageBtn.title = 'Управление сотрудниками';
-            manageBtn.onclick = (e) => {
-              e.stopPropagation();
-              openSlotModal(loc, time, data.staff || []);
-            };
-            slot.appendChild(manageBtn);
-          }
-
-          slot.onclick = (e) => {
-            if (e.target.classList.contains('slot-manage')) return;
-            if (status !== 'active') return;
-            clickSlot(loc, time, isMine, isFull);
+        // Кнопка «⋮» для админа — на всех слотах
+        if (currentUser?.is_admin) {
+          const manageBtn = document.createElement('button');
+          manageBtn.className = 'slot-manage';
+          manageBtn.textContent = '⋮';
+          manageBtn.title = 'Управление сотрудниками';
+          manageBtn.onclick = (e) => {
+            e.stopPropagation();
+            openSlotModal(activeLocation, time, data.staff || []);
           };
+          slot.appendChild(manageBtn);
+        }
 
-          slotsEl.appendChild(slot);
-        });
+        slot.onclick = (e) => {
+          if (e.target.classList.contains('slot-manage')) return;
+          if (status !== 'active') return;
+          clickSlot(activeLocation, time, isMine, isFull);
+        };
 
-        locEl.appendChild(slotsEl);
-        locWrap.appendChild(locEl);
+        slotsEl.appendChild(slot);
       });
 
+      locEl.appendChild(slotsEl);
+      locWrap.appendChild(locEl);
+
       container.appendChild(locWrap);
+    }
+
+        function setLocationTab(activeLocation) {
+      activeLocation = loc;
+      document.querySelectorAll('.location-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.loc === activeLocation);
+      });
+      renderSchedule();
     }
 
     function render() { renderWeek(); renderSchedule(); }
