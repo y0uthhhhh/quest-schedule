@@ -1036,10 +1036,10 @@
       container.appendChild(locWrap);
     }
 
-        function setLocationTab(activeLocation) {
+        function setLocationTab(loc) {
       activeLocation = loc;
       document.querySelectorAll('.location-tab').forEach(t => {
-        t.classList.toggle('active', t.dataset.loc === activeLocation);
+        t.classList.toggle('active', t.dataset.loc === loc);
       });
       renderSchedule();
     }
