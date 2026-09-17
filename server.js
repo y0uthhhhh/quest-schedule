@@ -642,22 +642,34 @@ app.post('/api/shift', async (req, res) => {
         await sendTelegramMessage(targetUser.telegram_id, personalText);
 
         // 2. В беседу — ТОЛЬКО если есть бронь
-        if (booking) {
+                if (booking) {
           const chatId = process.env.TELEGRAM_CHAT_ID;
           const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : null;
           if (chatId) {
-            const mention = targetUser.username ? `@${targetUser.username}` : targetUser.first_name;
+            // Получаем ВСЕХ сотрудников на слоте (включая нового)
+            const allStaffRes = await db.execute({
+              sql: `SELECT u.username, u.first_name
+                    FROM staff_shifts ss
+                    JOIN users u ON u.id = ss.user_id
+                    WHERE ss.slot_date = ? AND ss.slot_time = ? AND ss.location = ?`,
+              args: [slot_date, slot_time, location],
+            });
+            const allStaff = allStaffRes.rows;
+            const mentions = allStaff.map(s =>
+              s.username ? `@${s.username}` : s.first_name
+            ).join(', ');
+
             const commentLine = booking.comment ? `\n💬 Комментарий: ${booking.comment}` : '';
             const botLink = process.env.TELEGRAM_BOT_LINK
               ? `\n\n👉 <a href="${process.env.TELEGRAM_BOT_LINK}">Открыть расписание</a>`
               : '';
 
             const groupText =
-              `🎮 Назначен ответственный\n\n` +
+              `🎮 Назначен сотрудник\n\n` +
               `📍 Локация: ${location}\n` +
               `🎯 Квест: ${booking.quest_name}\n` +
               `📅 ${dateHuman}\n` +
-              `👥 Ответственный: ${mention}` +
+              `👥 Ответственные: ${mentions}` +
               commentLine +
               botLink;
 

@@ -120,20 +120,32 @@
     .slot.mine { border-color: #4caf7d; background: #1f3327; }
     .slot.full:not(.mine) { opacity: 0.85; }
 
-    /* 0 сотрудников — красный */
-    .slot.empty-staff {
+        /* Активные слоты: цвет по количеству сотрудников */
+    .slot.active-slot.empty-staff {
       border-color: #e05a5a !important;
       background: #2e1a1a !important;
     }
-    /* 1 сотрудник — оранжевый */
-    .slot.one-staff {
+    .slot.active-slot.one-staff {
       border-color: #e8903e !important;
       background: #2e2418 !important;
     }
-    /* 2+ сотрудников — зелёный */
-    .slot.ok-staff {
+    .slot.active-slot.ok-staff {
       border-color: #4caf7d !important;
       background: #1f3327 !important;
+    }
+    /* Архивные и закрытые — серые, всегда */
+    .slot.disabled {
+      opacity: 0.5;
+      background: #1f1f26 !important;
+      border-color: transparent !important;
+      cursor: default;
+    }
+    .slot.disabled:active {
+      background: #1f1f26 !important;
+    }
+    .slot.disabled .slot-quest,
+    .slot.disabled .slot-quest.empty {
+      color: #6a6a76 !important;
     }
 
         .slot-warning {
@@ -932,17 +944,23 @@
           const staffNames = data.staff.map(s => s.name).join(', ');
           const status = getSlotStatus(dateKey, time);
 
-                             let cls = 'slot';
-          if (isMine) cls += ' mine';
-          else if (isBooked) cls += ' booked';
-          if (isFull) cls += ' full';
+                    const isDisabled = status !== 'active';
 
-          // Подсветка по количеству сотрудников:
-          // 0 — красный, 1 — оранжевый, 2+ — зелёный
-          if (staffCount === 0) cls += ' empty-staff';
-          else if (staffCount === 1) cls += ' one-staff';
-          else cls += ' ok-staff';
-
+          let cls = 'slot';
+          if (isDisabled) {
+            // Архив или закрытая неделя — серый, без цветовой подсветки
+            cls += ' disabled';
+          } else {
+            // Активный слот — цвет по количеству сотрудников
+            cls += ' active-slot';
+            if (isMine) cls += ' mine';
+            else if (isBooked) cls += ' booked';
+            if (isFull) cls += ' full';
+            if (staffCount === 0) cls += ' empty-staff';
+            else if (staffCount === 1) cls += ' one-staff';
+            else cls += ' ok-staff';
+          }
+          
           const commentLine = (isBooked && data.comment)
             ? `<div class="slot-comment">${data.comment}</div>`
             : '';
